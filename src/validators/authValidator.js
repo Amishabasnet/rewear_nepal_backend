@@ -1,6 +1,6 @@
 const { body, validationResult } = require('express-validator');
 const ApiError = require('../utils/ApiError');
-const { isStrongPassword, STRONG_PASSWORD_MESSAGE } = require('../utils/passwordPolicy');
+const { isStrongPassword, STRONG_PASSWORD_MESSAGE } = require('../utils/passwordPolicy.js');
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
