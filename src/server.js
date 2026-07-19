@@ -14,6 +14,7 @@ const { ipAccessControl, globalLimiter, sensitiveActionLimiter } = require('./mi
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const productRoutes = require('./routes/productRoutes');
+const categoryRoutes = require('./routes/categoryRoutes');
 
 
 // Connect to MongoDB
@@ -59,6 +60,7 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/products', productRoutes);
+app.use('/api/categories', categoryRoutes);
 
 // Error Handling Middleware 
 app.use(notFound); // 404 handler - must come after all routes
