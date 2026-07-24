@@ -1,6 +1,7 @@
 const { body, validationResult } = require('express-validator');
 const ApiError = require('../utils/ApiError');
 const { isStrongPassword, STRONG_PASSWORD_MESSAGE } = require('../utils/passwordPolicy.js');
+const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -42,8 +43,10 @@ const registerValidationRules = [
 
   body('role')
     .optional()
-    .isIn(['user', 'admin'])
-    .withMessage('Role must be either "user" or "admin"'),
+    .isIn(['buyer', 'admin'])
+    .withMessage('Role must be "buyer" or "admin"')
+    .custom((value, { req }) => value !== 'admin' || isAdminEmail(req.body.email))
+    .withMessage(`Admin accounts can only be created with a ${ADMIN_EMAIL_DOMAIN} email address`),
 ];
 const loginValidationRules = [
   body('email')

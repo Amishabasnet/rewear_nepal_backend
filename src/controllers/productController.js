@@ -27,32 +27,64 @@ const buildImagesFromRequest = (req) => {
 
   if (Array.isArray(req.body.images)) {
     return req.body.images
+      .map((img) => (typeof img === 'string' ? { url: img, filename: '' } : img))
       .filter((img) => img && img.url)
-      .map((img) => ({ url: img.url, filename: '' }));
+      .map((img) => ({ url: img.url, filename: img.filename || '' }));
   }
 
   return undefined; // no images provided — leave existing/default value untouched
 };
 
+// Any logged-in user can list a product for sale. Admin-created listings are
+// auto-approved since they're already trusted; everyone else's go to review.
 const createProduct = asyncHandler(async (req, res) => {
-  const { name, description, price, discountPrice, category, brand, stock, isFeatured } =
-    req.body;
+  const {
+    name,
+    description,
+    price,
+    discountPrice,
+    originalPrice,
+    category,
+    gender,
+    size,
+    color,
+    condition,
+    location,
+    brand,
+    stock,
+    isFeatured,
+  } = req.body;
 
   const images = buildImagesFromRequest(req) || [];
+  const isAdmin = req.user.role === 'admin';
 
   const product = await Product.create({
+    seller: req.user._id,
     name,
     description,
     price,
     discountPrice: discountPrice || undefined,
+    originalPrice: originalPrice || undefined,
     category,
+    gender: gender || undefined,
+    size,
+    color,
+    condition: condition || undefined,
+    location,
     brand,
     stock,
     isFeatured,
     images,
+    approvalStatus: isAdmin ? 'approved' : 'pending',
   });
 
-  res.status(201).json({ success: true, data: product });
+  res.status(201).json({
+    success: true,
+    message: isAdmin
+      ? 'Product created'
+      : 'Listing submitted — it will go live once approved by an admin.',
+    data: product,
+  });
 });
 
 const SORT_OPTIONS = {
@@ -65,37 +97,61 @@ const SORT_OPTIONS = {
 
 const resolveSortOption = (sort) => SORT_OPTIONS[sort] || SORT_OPTIONS.newest;
 
+// Public storefront listing — only approved, active products are visible here.
 const getProducts = asyncHandler(async (req, res) => {
-  const { keyword, category, brand, minPrice, maxPrice, rating, sort, page, limit } =
-    req.query;
+  const {
+    keyword,
+    category,
+    brand,
+    gender,
+    size,
+    condition,
+    location,
+    minPrice,
+    maxPrice,
+    rating,
+    sort,
+    page,
+    limit,
+  } = req.query;
 
-  // ---- Build the MongoDB filter from query params ----
-  const filter = { isActive: true };
+  const filter = { isActive: true, approvalStatus: 'approved' };
 
-  // Search by name OR description
   if (keyword) {
     const searchRegex = { $regex: escapeRegex(keyword), $options: 'i' };
     filter.$or = [{ name: searchRegex }, { description: searchRegex }];
   }
 
-  // Filter by category (case-insensitive exact match)
   if (category) {
     filter.category = { $regex: `^${escapeRegex(category)}$`, $options: 'i' };
   }
 
-  // Filter by brand (case-insensitive exact match)
   if (brand) {
     filter.brand = { $regex: `^${escapeRegex(brand)}$`, $options: 'i' };
   }
 
-  // Filter by price range
+  if (gender) {
+    filter.gender = gender;
+  }
+
+  if (size) {
+    filter.size = { $regex: `^${escapeRegex(size)}$`, $options: 'i' };
+  }
+
+  if (condition) {
+    filter.condition = condition;
+  }
+
+  if (location) {
+    filter.location = { $regex: `^${escapeRegex(location)}$`, $options: 'i' };
+  }
+
   if (minPrice !== undefined || maxPrice !== undefined) {
     filter.price = {};
     if (minPrice !== undefined) filter.price.$gte = Number(minPrice);
     if (maxPrice !== undefined) filter.price.$lte = Number(maxPrice);
   }
 
-  // Filter by minimum rating (e.g. rating=4 -> 4 stars & up)
   if (rating !== undefined) {
     filter.rating = { $gte: Number(rating) };
   }
@@ -125,12 +181,48 @@ const getProducts = asyncHandler(async (req, res) => {
 const getProductById = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
 
-  if (!product || !product.isActive) {
+  if (!product || !product.isActive || product.approvalStatus !== 'approved') {
     throw new ApiError(404, 'Product not found');
   }
 
   res.status(200).json({ success: true, data: product });
 });
+
+// Products listed by the logged-in user, any status (pending/approved/rejected).
+const getMyProducts = asyncHandler(async (req, res) => {
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+
+  const filter = { seller: req.user._id };
+
+  const [products, total] = await Promise.all([
+    Product.find(filter)
+      .sort('-createdAt')
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Product.countDocuments(filter),
+  ]);
+
+  res.status(200).json({
+    success: true,
+    count: products.length,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1,
+    data: products,
+  });
+});
+
+const getMyProductById = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product || !product.seller || product.seller.toString() !== req.user._id.toString()) {
+    throw new ApiError(404, 'Product not found');
+  }
+  res.status(200).json({ success: true, data: product });
+});
+
+const canManage = (product, user) =>
+  user.role === 'admin' || (product.seller && product.seller.toString() === user._id.toString());
 
 const updateProduct = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
@@ -138,13 +230,22 @@ const updateProduct = asyncHandler(async (req, res) => {
   if (!product) {
     throw new ApiError(404, 'Product not found');
   }
+  if (!canManage(product, req.user)) {
+    throw new ApiError(403, 'You do not have permission to edit this product');
+  }
 
   const {
     name,
     description,
     price,
     discountPrice,
+    originalPrice,
     category,
+    gender,
+    size,
+    color,
+    condition,
+    location,
     brand,
     stock,
     isFeatured,
@@ -154,9 +255,22 @@ const updateProduct = asyncHandler(async (req, res) => {
   if (description !== undefined) product.description = description;
   if (price !== undefined) product.price = price;
   if (category !== undefined) product.category = category;
+  if (gender !== undefined) product.gender = gender;
+  if (size !== undefined) product.size = size;
+  if (color !== undefined) product.color = color;
+  if (condition !== undefined) product.condition = condition;
+  if (location !== undefined) product.location = location;
   if (brand !== undefined) product.brand = brand;
   if (stock !== undefined) product.stock = stock;
   if (isFeatured !== undefined) product.isFeatured = isFeatured;
+
+  if (originalPrice !== undefined) {
+    const effectivePrice = price !== undefined ? Number(price) : product.price;
+    if (originalPrice !== null && originalPrice !== '' && Number(originalPrice) < effectivePrice) {
+      throw new ApiError(400, 'Original price should be at least the current selling price');
+    }
+    product.originalPrice = originalPrice || undefined;
+  }
 
   if (discountPrice !== undefined) {
     const effectivePrice = price !== undefined ? Number(price) : product.price;
@@ -172,6 +286,13 @@ const updateProduct = asyncHandler(async (req, res) => {
     product.images = newImages;
   }
 
+  // A non-admin edit changes the listing, so it goes back through review.
+  // Admins editing (their own or anyone else's) keep it approved.
+  if (req.user.role !== 'admin') {
+    product.approvalStatus = 'pending';
+    product.rejectionReason = '';
+  }
+
   const updatedProduct = await product.save();
 
   res.status(200).json({ success: true, data: updatedProduct });
@@ -182,6 +303,9 @@ const deleteProduct = asyncHandler(async (req, res) => {
 
   if (!product) {
     throw new ApiError(404, 'Product not found');
+  }
+  if (!canManage(product, req.user)) {
+    throw new ApiError(403, 'You do not have permission to delete this product');
   }
 
   removeImageFilesFromDisk(product.images);
@@ -198,6 +322,9 @@ const updateStock = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (!product) {
     throw new ApiError(404, 'Product not found');
+  }
+  if (!canManage(product, req.user)) {
+    throw new ApiError(403, 'You do not have permission to update this product');
   }
 
   if (adjust !== undefined) {
@@ -227,6 +354,8 @@ module.exports = {
   createProduct,
   getProducts,
   getProductById,
+  getMyProducts,
+  getMyProductById,
   updateProduct,
   deleteProduct,
   updateStock,

@@ -1,11 +1,16 @@
 const express = require('express');
 const { uploadProductImages, uploadProfileImage } = require('../controllers/uploadController');
-const { protect, authorize } = require('../middleware/authMiddleware');
-const { uploadMultipleImages, uploadSingleImage } = require('../middleware/genericUploadMiddleware');
+const { protect } = require('../middleware/authMiddleware');
+const { uploadSingleImage } = require('../middleware/genericUploadMiddleware');
 
 const router = express.Router();
 
-router.post('/product', protect, authorize('admin'), uploadMultipleImages, uploadProductImages);
+router.post(
+  '/product',
+  protect,
+  uploadSingleImage,
+  uploadProductImages
+);
 
 router.post('/profile', protect, uploadSingleImage, uploadProfileImage);
 

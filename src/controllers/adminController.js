@@ -1,9 +1,11 @@
 const User = require('../models/userModel');
 const Product = require('../models/productModel');
 const Order = require('../models/orderModel');
-const Seller = require('../models/sellerModel');
+const Notification = require('../models/notificationModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
+const { removeImageFilesFromDisk } = require('./productController');
 
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 const DEFAULT_RECENT_ORDERS_LIMIT = 10;
@@ -128,6 +130,7 @@ const getDashboard = asyncHandler(async (req, res) => {
     salesSummary,
     recentOrders,
     lowStockProducts,
+    pendingProductsCount,
   ] = await Promise.all([
     User.countDocuments({}),
     Product.countDocuments({}),
@@ -139,6 +142,7 @@ const getDashboard = asyncHandler(async (req, res) => {
     Product.find({ isActive: true, stock: { $lte: lowStockThreshold } })
       .select('name stock price category brand')
       .sort('stock'),
+    Product.countDocuments({ approvalStatus: 'pending' }),
   ]);
 
   res.status(200).json({
@@ -151,6 +155,7 @@ const getDashboard = asyncHandler(async (req, res) => {
         totalRevenue,
         orderStatusBreakdown,
         salesSummary,
+        pendingProductsCount,
       },
       recentOrders,
       lowStockProducts,
@@ -165,7 +170,7 @@ const getAllUsers = asyncHandler(async (req, res) => {
   const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 20 });
 
   const filter = {};
-  if (req.query.role && ['user', 'admin'].includes(req.query.role)) {
+  if (req.query.role && ['buyer', 'admin'].includes(req.query.role)) {
     filter.role = req.query.role;
   }
   if (req.query.search) {
@@ -212,6 +217,13 @@ const updateUserRole = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) {
     throw new ApiError(404, 'User not found');
+  }
+
+  if (role === 'admin' && !isAdminEmail(user.email)) {
+    throw new ApiError(
+      403,
+      `Only accounts with a ${ADMIN_EMAIL_DOMAIN} email address can be made admin`
+    );
   }
 
   user.role = role;
@@ -275,49 +287,109 @@ const deleteUser = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, message: 'User deleted successfully' });
 });
 
-const getAllSellers = asyncHandler(async (req, res) => {
+const PRODUCT_LIST_POPULATE = { path: 'seller', select: 'name email' };
+
+const getAllProducts = asyncHandler(async (req, res) => {
   const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
   const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 20 });
 
   const filter = {};
-  if (req.query.status === 'pending') filter.isApproved = false;
-  if (req.query.status === 'approved') filter.isApproved = true;
+  if (req.query.approvalStatus) filter.approvalStatus = req.query.approvalStatus;
+  if (req.query.search) {
+    const regex = new RegExp(req.query.search, 'i');
+    filter.name = regex;
+  }
 
-  const [sellers, total] = await Promise.all([
-    Seller.find(filter)
-      .populate('user', 'name email phone')
+  const [products, total] = await Promise.all([
+    Product.find(filter)
+      .populate(PRODUCT_LIST_POPULATE)
       .sort('-createdAt')
       .skip((page - 1) * limit)
       .limit(limit),
-    Seller.countDocuments(filter),
+    Product.countDocuments(filter),
   ]);
 
   res.status(200).json({
     success: true,
-    count: sellers.length,
+    count: products.length,
     total,
     page,
     totalPages: Math.ceil(total / limit) || 1,
-    data: sellers,
+    data: products,
   });
 });
 
-const approveOrRejectSeller = asyncHandler(async (req, res) => {
-  const { isApproved } = req.body;
+const getPendingProducts = asyncHandler(async (req, res) => {
+  req.query.approvalStatus = 'pending';
+  return getAllProducts(req, res);
+});
 
-  const seller = await Seller.findById(req.params.id);
-  if (!seller) {
-    throw new ApiError(404, 'Seller not found');
+const getProductDetailAdmin = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id).populate(PRODUCT_LIST_POPULATE);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
+  }
+  res.status(200).json({ success: true, data: product });
+});
+
+const approveProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
   }
 
-  seller.isApproved = isApproved;
-  await seller.save();
+  product.approvalStatus = 'approved';
+  product.rejectionReason = '';
+  await product.save();
 
-  res.status(200).json({
-    success: true,
-    message: isApproved ? 'Seller approved' : 'Seller rejected',
-    data: seller,
-  });
+  if (product.seller) {
+    await Notification.create({
+      user: product.seller,
+      title: 'Listing approved',
+      message: `Your listing "${product.name}" has been approved and is now live for buyers.`,
+      type: 'general',
+    });
+  }
+
+  res.status(200).json({ success: true, message: 'Product approved', data: product });
+});
+
+const rejectProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
+  }
+
+  product.approvalStatus = 'rejected';
+  product.rejectionReason = req.body.reason || '';
+  await product.save();
+
+  if (product.seller) {
+    await Notification.create({
+      user: product.seller,
+      title: 'Listing rejected',
+      message: product.rejectionReason
+        ? `Your listing "${product.name}" was rejected: ${product.rejectionReason}`
+        : `Your listing "${product.name}" was rejected by an admin.`,
+      type: 'general',
+    });
+  }
+
+  res.status(200).json({ success: true, message: 'Product rejected', data: product });
+});
+
+const deleteProductAdmin = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
+  }
+
+  removeImageFilesFromDisk(product.images);
+
+  product.isActive = false;
+  await product.save();
+
+  res.status(200).json({ success: true, message: 'Product removed successfully' });
 });
 
 module.exports = {
@@ -330,6 +402,10 @@ module.exports = {
   updateUserRole,
   toggleBlockUser,
   deleteUser,
-  getAllSellers,
-  approveOrRejectSeller,
+  getAllProducts,
+  getPendingProducts,
+  getProductDetailAdmin,
+  approveProduct,
+  rejectProduct,
+  deleteProductAdmin,
 };

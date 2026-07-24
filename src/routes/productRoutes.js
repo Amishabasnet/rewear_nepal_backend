@@ -3,12 +3,15 @@ const {
   createProduct,
   getProducts,
   getProductById,
+  getMyProducts,
+  getMyProductById,
   updateProduct,
   deleteProduct,
   updateStock,
 } = require('../controllers/productController');
 const { addReview, getProductReviews } = require('../controllers/reviewController');
-const { protect, authorize } = require('../middleware/authMiddleware');
+const { createReport } = require('../controllers/reportController');
+const { protect } = require('../middleware/authMiddleware');
 const { uploadProductImages } = require('../middleware/uploadMiddleware');
 const { validate } = require('../validators/authValidator');
 const {
@@ -20,37 +23,42 @@ const {
   createReviewValidationRules,
   productIdParamValidationRules,
 } = require('../validators/reviewValidator');
+const { createReportValidationRules } = require('../validators/reportValidator');
 
 const router = express.Router();
 
 // Public routes
 router.get('/', getProductsValidationRules, validate, getProducts);
+
+// The logged-in user's own listings (any status) — must come before "/:id"
+router.get('/mine', protect, getMyProducts);
+router.get('/mine/:id', protect, getMyProductById);
+
 router.get('/:id', getProductById);
 
-// Admin-only routes
+// Any logged-in user can list a product for sale.
 router.post(
   '/',
   protect,
-  authorize('admin'),
   uploadProductImages,
   createProductValidationRules,
   validate,
   createProduct
 );
 
+// Editing/deleting is ownership-checked inside the controller (owner or admin).
 router.put(
   '/:id',
   protect,
-  authorize('admin'),
   uploadProductImages,
   updateProductValidationRules,
   validate,
   updateProduct
 );
 
-router.delete('/:id', protect, authorize('admin'), deleteProduct);
+router.delete('/:id', protect, deleteProduct);
 
-router.patch('/:id/stock', protect, authorize('admin'), updateStock);
+router.patch('/:id/stock', protect, updateStock);
 
 // Reviews nested under a product
 router.get('/:id/reviews', productIdParamValidationRules, validate, getProductReviews);
@@ -60,6 +68,15 @@ router.post(
   createReviewValidationRules,
   validate,
   addReview
+);
+
+// Report a product listing (any logged-in user)
+router.post(
+  '/:id/report',
+  protect,
+  createReportValidationRules,
+  validate,
+  createReport
 );
 
 module.exports = router;

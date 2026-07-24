@@ -4,7 +4,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const { sendTokenResponse } = require('../utils/generateToken.js');
 const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService');
-const { calculatePasswordStrength } = require('../utils/passwordPolicy.js/index.js');
+const { calculatePasswordStrength } = require('../utils/passwordPolicy');
+const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
 const register = asyncHandler(async (req, res) => {
   const { name, email, password, phone, role } = req.body;
 
@@ -13,12 +14,19 @@ const register = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'An account with this email already exists');
   }
 
+  if (role === 'admin' && !isAdminEmail(email)) {
+    throw new ApiError(
+      403,
+      `Admin accounts can only be created with a ${ADMIN_EMAIL_DOMAIN} email address`
+    );
+  }
+
   const user = await User.create({
     name,
     email,
     password,
     phone,
-    role: role === 'admin' ? 'admin' : 'user',
+    role: role === 'admin' ? 'admin' : 'buyer',
   });
 
   await sendWelcomeEmail(user);
@@ -45,6 +53,13 @@ const login = asyncHandler(async (req, res) => {
   if (!(await user.matchPassword(password))) {
     await user.registerFailedLogin();
     throw new ApiError(401, 'Invalid email or password');
+  }
+
+  if (user.role === 'admin' && !isAdminEmail(user.email)) {
+    throw new ApiError(
+      403,
+      `Admin accounts must use a ${ADMIN_EMAIL_DOMAIN} email address. Please contact support.`
+    );
   }
 
   if (user.isBlocked) {

@@ -17,7 +17,7 @@ const productSchema = new mongoose.Schema(
   {
     seller: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Seller',
+      ref: 'User',
       default: null,
     },
     name: {
@@ -48,12 +48,41 @@ const productSchema = new mongoose.Schema(
         message: 'Discount price must be lower than the regular price',
       },
     },
+    originalPrice: {
+      type: Number,
+      min: [0, 'Original price cannot be negative'],
+    },
     category: {
       type: String,
       required: [true, 'Product category is required'],
       trim: true,
     },
     brand: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    gender: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    size: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    color: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    condition: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    location: {
       type: String,
       trim: true,
       default: '',
@@ -100,17 +129,29 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true, // supports "soft delete" — see deleteProduct controller
     },
+    approvalStatus: {
+      type: String,
+      enum: {
+        values: ['pending', 'approved', 'rejected'],
+        message: 'Approval status must be "pending", "approved", or "rejected"',
+      },
+      default: 'pending',
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: '',
+    },
   },
   {
     timestamps: { createdAt: true, updatedAt: true },
   }
 );
 
-productSchema.pre('save', function (next) {
+productSchema.pre('save', function () {
   if (this.isNew || this.isModified('stock')) {
     this.isAvailable = this.stock > 0;
   }
-  next();
 });
 productSchema.virtual('inStock').get(function () {
   return this.stock > 0;
@@ -122,5 +163,6 @@ productSchema.index({ name: 'text', description: 'text', brand: 'text' });
 productSchema.index({ category: 1 });
 productSchema.index({ price: 1 });
 productSchema.index({ seller: 1 });
+productSchema.index({ approvalStatus: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

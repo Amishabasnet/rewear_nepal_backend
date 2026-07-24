@@ -21,6 +21,10 @@ const addressRoutes = require('./routes/addressRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const couponRoutes = require('./routes/couponRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 
 // Connect to MongoDB
 connectDB();
@@ -72,6 +76,10 @@ app.use('/api/addresses', addressRoutes);
 app.use('/api/orders', sensitiveActionLimiter, orderRoutes);
 app.use('/api/payments', sensitiveActionLimiter, paymentRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/upload', uploadRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/coupons', couponRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Error Handling Middleware 
 app.use(notFound); // 404 handler - must come after all routes

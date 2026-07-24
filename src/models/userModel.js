@@ -96,10 +96,10 @@ const userSchema = new mongoose.Schema(
     role: {
       type: String,
       enum: {
-        values: ['user', 'admin', 'seller'],
-        message: 'Role must be "user", "admin", or "seller"',
+        values: ['buyer', 'admin'],
+        message: 'Role must be "buyer" or "admin"',
       },
-      default: 'user',
+      default: 'buyer',
     },
     isBlocked: {
       type: Boolean,
@@ -128,12 +128,11 @@ const userSchema = new mongoose.Schema(
     toObject: { getters: true },
   }
 );
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
   const salt = await bcrypt.genSalt(BCRYPT_SALT_ROUNDS);
   this.password = await bcrypt.hash(this.password, salt);
   this.passwordChangedAt = new Date(Date.now() - 1000);
-  next();
 });
 
 // Instance method: compare a plaintext password to the stored hash

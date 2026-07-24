@@ -9,8 +9,12 @@ const {
   updateUserRole,
   toggleBlockUser,
   deleteUser,
-  getAllSellers,
-  approveOrRejectSeller,
+  getAllProducts,
+  getPendingProducts,
+  getProductDetailAdmin,
+  approveProduct,
+  rejectProduct,
+  deleteProductAdmin,
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { validate } = require('../validators/authValidator');
@@ -23,11 +27,10 @@ const {
   userIdParamValidationRules,
   updateUserRoleValidationRules,
   toggleBlockUserValidationRules,
+  getAllProductsValidationRules,
+  productIdParamValidationRules,
+  rejectProductValidationRules,
 } = require('../validators/adminValidator');
-const {
-  getAllSellersValidationRules,
-  approveSellerValidationRules,
-} = require('../validators/sellerValidator');
 
 const router = express.Router();
 
@@ -44,7 +47,12 @@ router.put('/users/:id', updateUserRoleValidationRules, validate, updateUserRole
 router.put('/users/:id/block', toggleBlockUserValidationRules, validate, toggleBlockUser);
 router.delete('/users/:id', userIdParamValidationRules, validate, deleteUser);
 
-router.get('/sellers', getAllSellersValidationRules, validate, getAllSellers);
-router.put('/sellers/:id/approve', approveSellerValidationRules, validate, approveOrRejectSeller);
+// Product moderation — "pending" must be registered before "/:id"
+router.get('/products/pending', getAllProductsValidationRules, validate, getPendingProducts);
+router.get('/products', getAllProductsValidationRules, validate, getAllProducts);
+router.get('/products/:id', productIdParamValidationRules, validate, getProductDetailAdmin);
+router.put('/products/:id/approve', productIdParamValidationRules, validate, approveProduct);
+router.put('/products/:id/reject', rejectProductValidationRules, validate, rejectProduct);
+router.delete('/products/:id', productIdParamValidationRules, validate, deleteProductAdmin);
 
 module.exports = router;
