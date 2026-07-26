@@ -106,6 +106,31 @@ const resetPasswordValidationRules = [
 const passwordStrengthCheckValidationRules = [
   body('password').notEmpty().withMessage('Password is required'),
 ];
+const mfaConfirmValidationRules = [
+  body('token')
+    .trim()
+    .notEmpty()
+    .withMessage('Authentication code is required')
+    .isLength({ min: 6, max: 6 })
+    .withMessage('Authentication code must be 6 digits')
+    .isNumeric()
+    .withMessage('Authentication code must be numeric'),
+];
+
+const mfaDisableValidationRules = [
+  body('password').notEmpty().withMessage('Password is required to disable MFA'),
+];
+
+const mfaChallengeValidationRules = [
+  body('mfaToken').notEmpty().withMessage('MFA session token is required'),
+  body('code')
+    .trim()
+    .notEmpty()
+    .withMessage('Authentication code is required')
+    .isLength({ min: 6, max: 10 })
+    .withMessage('Enter your 6-digit code or a backup code'),
+];
+
 module.exports = {
   validate,
   registerValidationRules,
@@ -114,4 +139,7 @@ module.exports = {
   forgotPasswordValidationRules,
   resetPasswordValidationRules,
   passwordStrengthCheckValidationRules,
+  mfaConfirmValidationRules,
+  mfaDisableValidationRules,
+  mfaChallengeValidationRules,
 };

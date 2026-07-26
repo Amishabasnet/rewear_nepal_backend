@@ -2,10 +2,13 @@ const User = require('../models/userModel');
 const Product = require('../models/productModel');
 const Order = require('../models/orderModel');
 const Notification = require('../models/notificationModel');
+const AuditLog = require('../models/auditLogModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
 const { removeImageFilesFromDisk } = require('./productController');
+const { logEvent } = require('../utils/auditLogger');
+const { revokeAllForUser } = require('../utils/refreshTokenService');
 
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 const DEFAULT_RECENT_ORDERS_LIMIT = 10;
@@ -226,8 +229,20 @@ const updateUserRole = asyncHandler(async (req, res) => {
     );
   }
 
+  const previousRole = user.role;
   user.role = role;
   await user.save();
+
+// Existing access tokens still carry the old role until they expire, but
+// protect() already rejects role mismatches — revoking refresh tokens too
+// stops them from silently getting a new one; they must log in again.
+  await revokeAllForUser(user._id);
+
+  await logEvent('ADMIN_USER_ROLE_CHANGED', {
+    user: req.user,
+    req,
+    details: { targetUserId: user._id.toString(), from: previousRole, to: role },
+  });
 
   res.status(200).json({
     success: true,
@@ -257,6 +272,16 @@ const toggleBlockUser = asyncHandler(async (req, res) => {
   user.isBlocked = typeof req.body.isBlocked === 'boolean' ? req.body.isBlocked : !user.isBlocked;
   await user.save();
 
+  if (user.isBlocked) {
+    await revokeAllForUser(user._id);
+  }
+
+  await logEvent('ADMIN_USER_BLOCK_TOGGLED', {
+    user: req.user,
+    req,
+    details: { targetUserId: user._id.toString(), isBlocked: user.isBlocked },
+  });
+
   res.status(200).json({
     success: true,
     message: user.isBlocked ? 'User has been blocked' : 'User has been unblocked',
@@ -283,6 +308,13 @@ const deleteUser = asyncHandler(async (req, res) => {
   }
 
   await user.deleteOne();
+  await revokeAllForUser(user._id);
+
+  await logEvent('ADMIN_USER_DELETED', {
+    user: req.user,
+    req,
+    details: { targetUserId: req.params.id, targetEmail: user.email },
+  });
 
   res.status(200).json({ success: true, message: 'User deleted successfully' });
 });
@@ -351,6 +383,12 @@ const approveProduct = asyncHandler(async (req, res) => {
     });
   }
 
+  await logEvent('ADMIN_PRODUCT_APPROVED', {
+    user: req.user,
+    req,
+    details: { productId: product._id.toString() },
+  });
+
   res.status(200).json({ success: true, message: 'Product approved', data: product });
 });
 
@@ -375,6 +413,12 @@ const rejectProduct = asyncHandler(async (req, res) => {
     });
   }
 
+  await logEvent('ADMIN_PRODUCT_REJECTED', {
+    user: req.user,
+    req,
+    details: { productId: product._id.toString(), reason: product.rejectionReason },
+  });
+
   res.status(200).json({ success: true, message: 'Product rejected', data: product });
 });
 
@@ -389,7 +433,43 @@ const deleteProductAdmin = asyncHandler(async (req, res) => {
   product.isActive = false;
   await product.save();
 
+  await logEvent('ADMIN_PRODUCT_DELETED', {
+    user: req.user,
+    req,
+    details: { productId: product._id.toString(), name: product.name },
+  });
+
   res.status(200).json({ success: true, message: 'Product removed successfully' });
+});
+
+// Admin-facing view of the security-event audit trail — supports filtering
+// by event name and/or a specific user, paginated most-recent-first.
+const getAuditLogs = asyncHandler(async (req, res) => {
+  const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
+  const limit = clampInt(req.query.limit, { min: 1, max: 200, fallback: 50 });
+
+  const filter = {};
+  if (req.query.event) filter.event = req.query.event;
+  if (req.query.userId) filter.user = req.query.userId;
+  if (req.query.success !== undefined) filter.success = req.query.success === 'true';
+
+  const [logs, total] = await Promise.all([
+    AuditLog.find(filter)
+      .populate('user', 'name email role')
+      .sort('-createdAt')
+      .skip((page - 1) * limit)
+      .limit(limit),
+    AuditLog.countDocuments(filter),
+  ]);
+
+  res.status(200).json({
+    success: true,
+    count: logs.length,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1,
+    data: logs,
+  });
 });
 
 module.exports = {
@@ -408,4 +488,5 @@ module.exports = {
   approveProduct,
   rejectProduct,
   deleteProductAdmin,
+  getAuditLogs,
 };

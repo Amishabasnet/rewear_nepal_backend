@@ -35,9 +35,32 @@ if (process.env.TRUST_PROXY === 'true') {
   app.set('trust proxy', 1);
 }
 
+// Global Middleware
+// crossOriginResourcePolicy is relaxed to "cross-origin" because the frontend
+// (e.g. localhost:5173) and this API (e.g. localhost:5000) run on different
+// origins/ports. Helmet's default "same-origin" policy blocks the browser
+// from loading static assets like /uploads/products/*.png from another
+// origin (net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin), even though CORS
+// itself allows it — CORS and CORP are enforced independently.
+//
+// Content-Security-Policy is left ON (not disabled) and explicitly
+// configured rather than relying on Helmet's implicit defaults, so the
+// intent is documented rather than assumed: this backend only ever serves
+// JSON and static images, it never renders an HTML page of its own, so
+// there is no legitimate reason for a browser context here to execute
+// scripts or load framed content from anywhere.
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        imgSrc: ["'self'"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'none'"],
+      },
+    },
   })
 );
 app.use(
