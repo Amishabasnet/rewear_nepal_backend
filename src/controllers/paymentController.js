@@ -38,7 +38,6 @@ const createPayment = asyncHandler(async (req, res) => {
   if (order.paymentStatus === 'Paid') {
     throw new ApiError(400, 'This order has already been paid for');
   }
-
   // Khalti amounts are expressed in paisa (1 NPR = 100 paisa)
   const amountInPaisa = Math.round(order.totalPrice * 100);
 

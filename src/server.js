@@ -21,6 +21,10 @@ const addressRoutes = require('./routes/addressRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const couponRoutes = require('./routes/couponRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 
 // Connect to MongoDB
 connectDB();
@@ -32,7 +36,33 @@ if (process.env.TRUST_PROXY === 'true') {
 }
 
 // Global Middleware
-app.use(helmet());
+// crossOriginResourcePolicy is relaxed to "cross-origin" because the frontend
+// (e.g. localhost:5173) and this API (e.g. localhost:5000) run on different
+// origins/ports. Helmet's default "same-origin" policy blocks the browser
+// from loading static assets like /uploads/products/*.png from another
+// origin (net::ERR_BLOCKED_BY_RESPONSE.NotSameOrigin), even though CORS
+// itself allows it — CORS and CORP are enforced independently.
+//
+// Content-Security-Policy is left ON (not disabled) and explicitly
+// configured rather than relying on Helmet's implicit defaults, so the
+// intent is documented rather than assumed: this backend only ever serves
+// JSON and static images, it never renders an HTML page of its own, so
+// there is no legitimate reason for a browser context here to execute
+// scripts or load framed content from anywhere.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        imgSrc: ["'self'"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'none'"],
+      },
+    },
+  })
+);
 app.use(
   cors({
     origin: process.env.CLIENT_URL || '*',
@@ -72,6 +102,10 @@ app.use('/api/addresses', addressRoutes);
 app.use('/api/orders', sensitiveActionLimiter, orderRoutes);
 app.use('/api/payments', sensitiveActionLimiter, paymentRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/upload', uploadRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/coupons', couponRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Error Handling Middleware 
 app.use(notFound); // 404 handler - must come after all routes

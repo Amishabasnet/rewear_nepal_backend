@@ -1,6 +1,7 @@
 const { body, validationResult } = require('express-validator');
 const ApiError = require('../utils/ApiError');
 const { isStrongPassword, STRONG_PASSWORD_MESSAGE } = require('../utils/passwordPolicy.js');
+const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -13,6 +14,8 @@ const validate = (req, res, next) => {
   next();
 };
 const registerValidationRules = [
+  body('captchaToken').notEmpty().withMessage('Please complete the CAPTCHA'),
+
   body('name')
     .trim()
     .notEmpty()
@@ -42,10 +45,14 @@ const registerValidationRules = [
 
   body('role')
     .optional()
-    .isIn(['user', 'admin'])
-    .withMessage('Role must be either "user" or "admin"'),
+    .isIn(['buyer', 'admin'])
+    .withMessage('Role must be "buyer" or "admin"')
+    .custom((value, { req }) => value !== 'admin' || isAdminEmail(req.body.email))
+    .withMessage(`Admin accounts can only be created with a ${ADMIN_EMAIL_DOMAIN} email address`),
 ];
 const loginValidationRules = [
+  body('captchaToken').notEmpty().withMessage('Please complete the CAPTCHA'),
+
   body('email')
     .trim()
     .notEmpty()
@@ -99,6 +106,31 @@ const resetPasswordValidationRules = [
 const passwordStrengthCheckValidationRules = [
   body('password').notEmpty().withMessage('Password is required'),
 ];
+const mfaConfirmValidationRules = [
+  body('token')
+    .trim()
+    .notEmpty()
+    .withMessage('Authentication code is required')
+    .isLength({ min: 6, max: 6 })
+    .withMessage('Authentication code must be 6 digits')
+    .isNumeric()
+    .withMessage('Authentication code must be numeric'),
+];
+
+const mfaDisableValidationRules = [
+  body('password').notEmpty().withMessage('Password is required to disable MFA'),
+];
+
+const mfaChallengeValidationRules = [
+  body('mfaToken').notEmpty().withMessage('MFA session token is required'),
+  body('code')
+    .trim()
+    .notEmpty()
+    .withMessage('Authentication code is required')
+    .isLength({ min: 6, max: 10 })
+    .withMessage('Enter your 6-digit code or a backup code'),
+];
+
 module.exports = {
   validate,
   registerValidationRules,
@@ -107,4 +139,7 @@ module.exports = {
   forgotPasswordValidationRules,
   resetPasswordValidationRules,
   passwordStrengthCheckValidationRules,
+  mfaConfirmValidationRules,
+  mfaDisableValidationRules,
+  mfaChallengeValidationRules,
 };

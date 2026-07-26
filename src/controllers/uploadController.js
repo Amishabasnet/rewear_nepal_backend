@@ -4,18 +4,15 @@ const ApiError = require('../utils/ApiError');
 const { storeImage } = require('../utils/imageStorageService');
 
 const uploadProductImages = asyncHandler(async (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    throw new ApiError(400, 'At least one image file is required (field name: "images")');
+  if (!req.file) {
+    throw new ApiError(400, 'An image file is required (field name: "image")');
   }
 
-  const uploaded = await Promise.all(
-    req.files.map((file) => storeImage(file.buffer, file.originalname, 'products'))
-  );
+  const uploaded = await storeImage(req.file.buffer, req.file.originalname, 'products');
 
   res.status(201).json({
     success: true,
-    count: uploaded.length,
-    data: uploaded.map((img) => ({ url: img.url, publicId: img.publicId })),
+    data: { url: uploaded.url, publicId: uploaded.publicId },
   });
 });
 

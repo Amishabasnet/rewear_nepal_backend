@@ -39,7 +39,7 @@ const getAllUsersValidationRules = [
     .optional()
     .isInt({ min: 1, max: 100 })
     .withMessage('limit must be an integer between 1 and 100'),
-  query('role').optional().isIn(['user', 'admin']).withMessage('role must be "user" or "admin"'),
+  query('role').optional().isIn(['buyer', 'admin']).withMessage('role must be "buyer" or "admin"'),
   query('search').optional().trim().escape(),
 ];
 const userIdParamValidationRules = [
@@ -50,12 +50,31 @@ const updateUserRoleValidationRules = [
   body('role')
     .notEmpty()
     .withMessage('Role is required')
-    .isIn(['user', 'admin'])
-    .withMessage('Role must be either "user" or "admin"'),
+    .isIn(['buyer', 'admin'])
+    .withMessage('Role must be either "buyer" or "admin"'),
 ];
 const toggleBlockUserValidationRules = [
   param('id').isMongoId().withMessage('Invalid user id'),
   body('isBlocked').optional().isBoolean().withMessage('isBlocked must be true or false'),
+];
+const getAllProductsValidationRules = [
+  query('page').optional().isInt({ min: 1 }).withMessage('page must be a positive integer'),
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('limit must be an integer between 1 and 100'),
+  query('approvalStatus')
+    .optional()
+    .isIn(['pending', 'approved', 'rejected'])
+    .withMessage('approvalStatus must be one of: pending, approved, rejected'),
+  query('search').optional().trim().escape(),
+];
+const productIdParamValidationRules = [
+  param('id').isMongoId().withMessage('Invalid product id'),
+];
+const rejectProductValidationRules = [
+  param('id').isMongoId().withMessage('Invalid product id'),
+  body('reason').optional().trim().isLength({ max: 500 }).withMessage('reason cannot exceed 500 characters'),
 ];
 module.exports = {
   statsValidationRules,
@@ -66,4 +85,7 @@ module.exports = {
   userIdParamValidationRules,
   updateUserRoleValidationRules,
   toggleBlockUserValidationRules,
+  getAllProductsValidationRules,
+  productIdParamValidationRules,
+  rejectProductValidationRules,
 };

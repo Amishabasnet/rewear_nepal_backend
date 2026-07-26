@@ -1,9 +1,14 @@
 const User = require('../models/userModel');
 const Product = require('../models/productModel');
 const Order = require('../models/orderModel');
-const Seller = require('../models/sellerModel');
+const Notification = require('../models/notificationModel');
+const AuditLog = require('../models/auditLogModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
+const { removeImageFilesFromDisk } = require('./productController');
+const { logEvent } = require('../utils/auditLogger');
+const { revokeAllForUser } = require('../utils/refreshTokenService');
 
 const DEFAULT_LOW_STOCK_THRESHOLD = 10;
 const DEFAULT_RECENT_ORDERS_LIMIT = 10;
@@ -128,6 +133,7 @@ const getDashboard = asyncHandler(async (req, res) => {
     salesSummary,
     recentOrders,
     lowStockProducts,
+    pendingProductsCount,
   ] = await Promise.all([
     User.countDocuments({}),
     Product.countDocuments({}),
@@ -139,6 +145,7 @@ const getDashboard = asyncHandler(async (req, res) => {
     Product.find({ isActive: true, stock: { $lte: lowStockThreshold } })
       .select('name stock price category brand')
       .sort('stock'),
+    Product.countDocuments({ approvalStatus: 'pending' }),
   ]);
 
   res.status(200).json({
@@ -151,6 +158,7 @@ const getDashboard = asyncHandler(async (req, res) => {
         totalRevenue,
         orderStatusBreakdown,
         salesSummary,
+        pendingProductsCount,
       },
       recentOrders,
       lowStockProducts,
@@ -165,7 +173,7 @@ const getAllUsers = asyncHandler(async (req, res) => {
   const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 20 });
 
   const filter = {};
-  if (req.query.role && ['user', 'admin'].includes(req.query.role)) {
+  if (req.query.role && ['buyer', 'admin'].includes(req.query.role)) {
     filter.role = req.query.role;
   }
   if (req.query.search) {
@@ -214,8 +222,27 @@ const updateUserRole = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'User not found');
   }
 
+  if (role === 'admin' && !isAdminEmail(user.email)) {
+    throw new ApiError(
+      403,
+      `Only accounts with a ${ADMIN_EMAIL_DOMAIN} email address can be made admin`
+    );
+  }
+
+  const previousRole = user.role;
   user.role = role;
   await user.save();
+
+// Existing access tokens still carry the old role until they expire, but
+// protect() already rejects role mismatches — revoking refresh tokens too
+// stops them from silently getting a new one; they must log in again.
+  await revokeAllForUser(user._id);
+
+  await logEvent('ADMIN_USER_ROLE_CHANGED', {
+    user: req.user,
+    req,
+    details: { targetUserId: user._id.toString(), from: previousRole, to: role },
+  });
 
   res.status(200).json({
     success: true,
@@ -245,6 +272,16 @@ const toggleBlockUser = asyncHandler(async (req, res) => {
   user.isBlocked = typeof req.body.isBlocked === 'boolean' ? req.body.isBlocked : !user.isBlocked;
   await user.save();
 
+  if (user.isBlocked) {
+    await revokeAllForUser(user._id);
+  }
+
+  await logEvent('ADMIN_USER_BLOCK_TOGGLED', {
+    user: req.user,
+    req,
+    details: { targetUserId: user._id.toString(), isBlocked: user.isBlocked },
+  });
+
   res.status(200).json({
     success: true,
     message: user.isBlocked ? 'User has been blocked' : 'User has been unblocked',
@@ -271,52 +308,167 @@ const deleteUser = asyncHandler(async (req, res) => {
   }
 
   await user.deleteOne();
+  await revokeAllForUser(user._id);
+
+  await logEvent('ADMIN_USER_DELETED', {
+    user: req.user,
+    req,
+    details: { targetUserId: req.params.id, targetEmail: user.email },
+  });
 
   res.status(200).json({ success: true, message: 'User deleted successfully' });
 });
 
-const getAllSellers = asyncHandler(async (req, res) => {
+const PRODUCT_LIST_POPULATE = { path: 'seller', select: 'name email' };
+
+const getAllProducts = asyncHandler(async (req, res) => {
   const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
   const limit = clampInt(req.query.limit, { min: 1, max: 100, fallback: 20 });
 
   const filter = {};
-  if (req.query.status === 'pending') filter.isApproved = false;
-  if (req.query.status === 'approved') filter.isApproved = true;
+  if (req.query.approvalStatus) filter.approvalStatus = req.query.approvalStatus;
+  if (req.query.search) {
+    const regex = new RegExp(req.query.search, 'i');
+    filter.name = regex;
+  }
 
-  const [sellers, total] = await Promise.all([
-    Seller.find(filter)
-      .populate('user', 'name email phone')
+  const [products, total] = await Promise.all([
+    Product.find(filter)
+      .populate(PRODUCT_LIST_POPULATE)
       .sort('-createdAt')
       .skip((page - 1) * limit)
       .limit(limit),
-    Seller.countDocuments(filter),
+    Product.countDocuments(filter),
   ]);
 
   res.status(200).json({
     success: true,
-    count: sellers.length,
+    count: products.length,
     total,
     page,
     totalPages: Math.ceil(total / limit) || 1,
-    data: sellers,
+    data: products,
   });
 });
 
-const approveOrRejectSeller = asyncHandler(async (req, res) => {
-  const { isApproved } = req.body;
+const getPendingProducts = asyncHandler(async (req, res) => {
+  req.query.approvalStatus = 'pending';
+  return getAllProducts(req, res);
+});
 
-  const seller = await Seller.findById(req.params.id);
-  if (!seller) {
-    throw new ApiError(404, 'Seller not found');
+const getProductDetailAdmin = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id).populate(PRODUCT_LIST_POPULATE);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
+  }
+  res.status(200).json({ success: true, data: product });
+});
+
+const approveProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
   }
 
-  seller.isApproved = isApproved;
-  await seller.save();
+  product.approvalStatus = 'approved';
+  product.rejectionReason = '';
+  await product.save();
+
+  if (product.seller) {
+    await Notification.create({
+      user: product.seller,
+      title: 'Listing approved',
+      message: `Your listing "${product.name}" has been approved and is now live for buyers.`,
+      type: 'general',
+    });
+  }
+
+  await logEvent('ADMIN_PRODUCT_APPROVED', {
+    user: req.user,
+    req,
+    details: { productId: product._id.toString() },
+  });
+
+  res.status(200).json({ success: true, message: 'Product approved', data: product });
+});
+
+const rejectProduct = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
+  }
+
+  product.approvalStatus = 'rejected';
+  product.rejectionReason = req.body.reason || '';
+  await product.save();
+
+  if (product.seller) {
+    await Notification.create({
+      user: product.seller,
+      title: 'Listing rejected',
+      message: product.rejectionReason
+        ? `Your listing "${product.name}" was rejected: ${product.rejectionReason}`
+        : `Your listing "${product.name}" was rejected by an admin.`,
+      type: 'general',
+    });
+  }
+
+  await logEvent('ADMIN_PRODUCT_REJECTED', {
+    user: req.user,
+    req,
+    details: { productId: product._id.toString(), reason: product.rejectionReason },
+  });
+
+  res.status(200).json({ success: true, message: 'Product rejected', data: product });
+});
+
+const deleteProductAdmin = asyncHandler(async (req, res) => {
+  const product = await Product.findById(req.params.id);
+  if (!product) {
+    throw new ApiError(404, 'Product not found');
+  }
+
+  removeImageFilesFromDisk(product.images);
+
+  product.isActive = false;
+  await product.save();
+
+  await logEvent('ADMIN_PRODUCT_DELETED', {
+    user: req.user,
+    req,
+    details: { productId: product._id.toString(), name: product.name },
+  });
+
+  res.status(200).json({ success: true, message: 'Product removed successfully' });
+});
+
+// Admin-facing view of the security-event audit trail — supports filtering
+// by event name and/or a specific user, paginated most-recent-first.
+const getAuditLogs = asyncHandler(async (req, res) => {
+  const page = clampInt(req.query.page, { min: 1, max: 100000, fallback: 1 });
+  const limit = clampInt(req.query.limit, { min: 1, max: 200, fallback: 50 });
+
+  const filter = {};
+  if (req.query.event) filter.event = req.query.event;
+  if (req.query.userId) filter.user = req.query.userId;
+  if (req.query.success !== undefined) filter.success = req.query.success === 'true';
+
+  const [logs, total] = await Promise.all([
+    AuditLog.find(filter)
+      .populate('user', 'name email role')
+      .sort('-createdAt')
+      .skip((page - 1) * limit)
+      .limit(limit),
+    AuditLog.countDocuments(filter),
+  ]);
 
   res.status(200).json({
     success: true,
-    message: isApproved ? 'Seller approved' : 'Seller rejected',
-    data: seller,
+    count: logs.length,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1,
+    data: logs,
   });
 });
 
@@ -330,6 +482,11 @@ module.exports = {
   updateUserRole,
   toggleBlockUser,
   deleteUser,
-  getAllSellers,
-  approveOrRejectSeller,
+  getAllProducts,
+  getPendingProducts,
+  getProductDetailAdmin,
+  approveProduct,
+  rejectProduct,
+  deleteProductAdmin,
+  getAuditLogs,
 };

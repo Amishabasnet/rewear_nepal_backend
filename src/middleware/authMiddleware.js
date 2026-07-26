@@ -2,26 +2,41 @@ const jwt = require('jsonwebtoken');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const User = require('../models/userModel');
-const { hashUserAgent } = require('../utils/generateToken');
-const protect = asyncHandler(async (req, res, next) => {
-  let token;
+const { hashUserAgent, getSecretForRole } = require('../utils/generateToken');
 
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
-  } else if (req.cookies && req.cookies.token) {
-    token = req.cookies.token;
+// Reads the role claim (unverified) just to pick which secret to check
+// the signature against. Safe: jwt.decode() proves nothing on its own —
+// jwt.verify() right after is the actual trust check, and it fails if the
+// payload was tampered with to claim a role it wasn't signed for.
+const verifyToken = (token) => {
+  const unverified = jwt.decode(token);
+  if (!unverified || !unverified.role) {
+    throw new ApiError(401, 'Not authorized, invalid or expired token');
   }
+  try {
+    return jwt.verify(token, getSecretForRole(unverified.role));
+  } catch {
+    throw new ApiError(401, 'Not authorized, invalid or expired token');
+  }
+};
 
+const extractToken = (req) => {
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    return req.headers.authorization.split(' ')[1];
+  }
+  if (req.cookies && req.cookies.token) {
+    return req.cookies.token;
+  }
+  return null;
+};
+
+const protect = asyncHandler(async (req, res, next) => {
+  const token = extractToken(req);
   if (!token) {
     throw new ApiError(401, 'Not authorized, no token provided');
   }
 
-  let decoded;
-  try {
-    decoded = jwt.verify(token, process.env.JWT_SECRET);
-  } catch (err) {
-    throw new ApiError(401, 'Not authorized, invalid or expired token');
-  }
+  const decoded = verifyToken(token);
 
   const user = await User.findById(decoded.id);
   if (!user) {
@@ -39,6 +54,12 @@ const protect = asyncHandler(async (req, res, next) => {
     );
   }
 
+ // Defense in depth: reject if the token's role no longer matches the
+// user's current DB role (e.g. they were demoted after it was issued).
+  if (decoded.role !== user.role) {
+    throw new ApiError(401, 'Your role has changed. Please log in again.');
+  }
+
   if (process.env.BIND_SESSION_TO_USER_AGENT === 'true') {
     const currentUaHash = hashUserAgent(req.headers['user-agent']);
     if (decoded.ua && decoded.ua !== currentUaHash) {
@@ -54,34 +75,31 @@ const protect = asyncHandler(async (req, res, next) => {
 });
 
 const optionalAuth = asyncHandler(async (req, res, next) => {
-  let token;
-  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-    token = req.headers.authorization.split(' ')[1];
-  } else if (req.cookies && req.cookies.token) {
-    token = req.cookies.token;
-  }
-
+  const token = extractToken(req);
   if (!token) return next();
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyToken(token);
     const user = await User.findById(decoded.id);
 
     if (
       user &&
       !user.isBlocked &&
       (decoded.tv || 0) === (user.tokenVersion || 0) &&
+      decoded.role === user.role &&
       (process.env.BIND_SESSION_TO_USER_AGENT !== 'true' ||
         !decoded.ua ||
         decoded.ua === hashUserAgent(req.headers['user-agent']))
     ) {
       req.user = user;
     }
-  } catch (err) {
+  } catch {
+    // optional auth: any failure just means "not logged in", not an error
   }
 
   next();
 });
+
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {

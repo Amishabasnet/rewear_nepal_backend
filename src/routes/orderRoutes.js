@@ -6,6 +6,7 @@ const {
   cancelOrder,
   getAllOrders,
   updateOrderStatus,
+  getMySales,
 } = require('../controllers/orderController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const { enforcePasswordNotExpired } = require('../middleware/passwordExpiry');
@@ -23,6 +24,7 @@ router.use(protect);
 
 router.post('/', enforcePasswordNotExpired, placeOrderValidationRules, validate, placeOrder);
 router.get('/my-orders', getMyOrders);
+router.get('/my-sales', getMySales);
 router.get('/admin/all', authorize('admin'), getAllOrders);
 router.get('/:id', orderIdParamValidationRules, validate, getOrderById);
 router.put('/:id/cancel', orderIdParamValidationRules, validate, cancelOrder);

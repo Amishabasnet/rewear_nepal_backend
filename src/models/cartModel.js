@@ -46,9 +46,8 @@ cartSchema.methods.recalculateTotal = function () {
   this.totalAmount = Math.round(total * 100) / 100;
 };
 
-cartSchema.pre('save', function (next) {
+cartSchema.pre('save', function () {
   this.recalculateTotal();
-  next();
 });
 
 module.exports = mongoose.model('Cart', cartSchema);

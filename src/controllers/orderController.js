@@ -14,10 +14,14 @@ const NON_CANCELLABLE_STATUSES = ['Shipped', 'Delivered', 'Cancelled'];
 const restoreStockForOrder = async (order) => {
   await Promise.all(
     order.orderItems.map((item) =>
-      Product.updateOne({ _id: item.product }, [
-        { $set: { stock: { $add: ['$stock', item.quantity] } } },
-        { $set: { isAvailable: { $gt: ['$stock', 0] } } },
-      ])
+      Product.updateOne(
+        { _id: item.product },
+        [
+          { $set: { stock: { $add: ['$stock', item.quantity] } } },
+          { $set: { isAvailable: { $gt: ['$stock', 0] } } },
+        ],
+        { updatePipeline: true }
+      )
     )
   );
 };
@@ -85,6 +89,7 @@ const placeOrder = asyncHandler(async (req, res) => {
   }
   const totalPrice = Math.round((subtotal - discountAmount) * 100) / 100;
   const decremented = [];
+  let order;
   try {
     for (const item of orderItems) {
       const result = await Product.updateOne(
@@ -92,7 +97,8 @@ const placeOrder = asyncHandler(async (req, res) => {
         [
           { $set: { stock: { $subtract: ['$stock', item.quantity] } } },
           { $set: { isAvailable: { $gt: ['$stock', 0] } } },
-        ]
+        ],
+        { updatePipeline: true }
       );
       if (result.matchedCount === 0) {
         throw new ApiError(
@@ -102,28 +108,37 @@ const placeOrder = asyncHandler(async (req, res) => {
       }
       decremented.push(item);
     }
+
+    // Order.create is inside this same try block on purpose: if it throws
+    // (e.g. an invalid/missing shippingAddress field, bad paymentMethod),
+    // the catch below restores the stock we just decremented. Previously
+    // this call sat outside the try/catch, so a failed order would leave
+    // stock permanently decremented with no order to show for it.
+    order = await Order.create({
+      user: req.user._id,
+      orderItems,
+      shippingAddress: shippingAddressSnapshot,
+      paymentMethod,
+      subtotal,
+      totalPrice,
+      couponCode: coupon ? coupon.code : null,
+      discountAmount,
+    });
   } catch (err) {
     await Promise.all(
       decremented.map((item) =>
-        Product.updateOne({ _id: item.product }, [
-          { $set: { stock: { $add: ['$stock', item.quantity] } } },
-          { $set: { isAvailable: { $gt: ['$stock', 0] } } },
-        ])
+        Product.updateOne(
+          { _id: item.product },
+          [
+            { $set: { stock: { $add: ['$stock', item.quantity] } } },
+            { $set: { isAvailable: { $gt: ['$stock', 0] } } },
+          ],
+          { updatePipeline: true }
+        )
       )
     );
     throw err;
   }
-
-  const order = await Order.create({
-    user: req.user._id,
-    orderItems,
-    shippingAddress: shippingAddressSnapshot,
-    paymentMethod,
-    subtotal,
-    totalPrice,
-    couponCode: coupon ? coupon.code : null,
-    discountAmount,
-  });
  
   if (coupon) {
     try {
@@ -232,6 +247,65 @@ const updateOrderStatus = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: order });
 });
 
+// Orders that include at least one product the logged-in user has listed for sale.
+const getMySales = asyncHandler(async (req, res) => {
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+
+  const productIds = await Product.find({ seller: req.user._id }).distinct('_id');
+
+  if (productIds.length === 0) {
+    return res.status(200).json({
+      success: true,
+      count: 0,
+      total: 0,
+      page,
+      totalPages: 1,
+      data: [],
+    });
+  }
+
+  const filter = { 'orderItems.product': { $in: productIds } };
+
+  const [orders, total] = await Promise.all([
+    Order.find(filter)
+      .populate('user', 'name email')
+      .sort('-createdAt')
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Order.countDocuments(filter),
+  ]);
+
+  const productIdSet = new Set(productIds.map((id) => id.toString()));
+
+  const data = orders.map((order) => {
+    const myItems = order.orderItems.filter((item) => productIdSet.has(item.product.toString()));
+    const mySubtotal = myItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+    return {
+      _id: order._id,
+      buyer: order.user,
+      orderStatus: order.orderStatus,
+      paymentStatus: order.paymentStatus,
+      paymentMethod: order.paymentMethod,
+      shippingAddress: order.shippingAddress,
+      createdAt: order.createdAt,
+      deliveredAt: order.deliveredAt,
+      items: myItems,
+      mySubtotal,
+    };
+  });
+
+  res.status(200).json({
+    success: true,
+    count: data.length,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit) || 1,
+    data,
+  });
+});
+
 module.exports = {
   placeOrder,
   getMyOrders,
@@ -239,4 +313,5 @@ module.exports = {
   cancelOrder,
   getAllOrders,
   updateOrderStatus,
+  getMySales,
 };
