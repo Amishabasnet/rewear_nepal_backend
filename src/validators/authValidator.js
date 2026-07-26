@@ -14,6 +14,8 @@ const validate = (req, res, next) => {
   next();
 };
 const registerValidationRules = [
+  body('captchaToken').notEmpty().withMessage('Please complete the CAPTCHA'),
+
   body('name')
     .trim()
     .notEmpty()
@@ -49,6 +51,8 @@ const registerValidationRules = [
     .withMessage(`Admin accounts can only be created with a ${ADMIN_EMAIL_DOMAIN} email address`),
 ];
 const loginValidationRules = [
+  body('captchaToken').notEmpty().withMessage('Please complete the CAPTCHA'),
+
   body('email')
     .trim()
     .notEmpty()

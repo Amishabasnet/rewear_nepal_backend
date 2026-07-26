@@ -135,7 +135,7 @@ userSchema.pre('save', async function () {
   this.passwordChangedAt = new Date(Date.now() - 1000);
 });
 
-// Instance method: compare a plaintext password to the stored hash
+// Compare a plaintext password to the stored hash
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return bcrypt.compare(enteredPassword, this.password);
 };

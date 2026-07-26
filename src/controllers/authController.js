@@ -6,8 +6,14 @@ const { sendTokenResponse } = require('../utils/generateToken.js');
 const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService');
 const { calculatePasswordStrength } = require('../utils/passwordPolicy');
 const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
+const { verifyCaptcha } = require('../utils/captchaService');
 const register = asyncHandler(async (req, res) => {
-  const { name, email, password, phone, role } = req.body;
+  const { name, email, password, phone, role, captchaToken } = req.body;
+
+  const captchaValid = await verifyCaptcha(captchaToken, req.ip);
+  if (!captchaValid) {
+    throw new ApiError(400, 'CAPTCHA verification failed. Please try again.');
+  }
 
   const existingUser = await User.findOne({ email });
   if (existingUser) {
@@ -35,7 +41,12 @@ const register = asyncHandler(async (req, res) => {
 });
 
 const login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, captchaToken } = req.body;
+
+  const captchaValid = await verifyCaptcha(captchaToken, req.ip);
+  if (!captchaValid) {
+    throw new ApiError(400, 'CAPTCHA verification failed. Please try again.');
+  }
 
   const user = await User.findOne({ email }).select('+password +loginAttempts +lockUntil');
 

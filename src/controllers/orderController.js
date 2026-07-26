@@ -89,6 +89,7 @@ const placeOrder = asyncHandler(async (req, res) => {
   }
   const totalPrice = Math.round((subtotal - discountAmount) * 100) / 100;
   const decremented = [];
+  let order;
   try {
     for (const item of orderItems) {
       const result = await Product.updateOne(
@@ -107,6 +108,22 @@ const placeOrder = asyncHandler(async (req, res) => {
       }
       decremented.push(item);
     }
+
+    // Order.create is inside this same try block on purpose: if it throws
+    // (e.g. an invalid/missing shippingAddress field, bad paymentMethod),
+    // the catch below restores the stock we just decremented. Previously
+    // this call sat outside the try/catch, so a failed order would leave
+    // stock permanently decremented with no order to show for it.
+    order = await Order.create({
+      user: req.user._id,
+      orderItems,
+      shippingAddress: shippingAddressSnapshot,
+      paymentMethod,
+      subtotal,
+      totalPrice,
+      couponCode: coupon ? coupon.code : null,
+      discountAmount,
+    });
   } catch (err) {
     await Promise.all(
       decremented.map((item) =>
@@ -122,17 +139,6 @@ const placeOrder = asyncHandler(async (req, res) => {
     );
     throw err;
   }
-
-  const order = await Order.create({
-    user: req.user._id,
-    orderItems,
-    shippingAddress: shippingAddressSnapshot,
-    paymentMethod,
-    subtotal,
-    totalPrice,
-    couponCode: coupon ? coupon.code : null,
-    discountAmount,
-  });
  
   if (coupon) {
     try {
