@@ -2,16 +2,10 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
-const { sendTokenResponse } = require('../utils/generateToken');
+const { issueSession } = require('../utils/sessionService');
 const mfaService = require('../utils/mfaService');
 const { logEvent } = require('../utils/auditLogger');
 
-// Step 1 of enrollment: generate a TOTP secret + QR code and store the
-// secret (encrypted at rest via the schema setter), but do NOT flip
-// mfaEnabled yet. MFA only becomes active once the user proves they can
-// generate a valid code from it, in confirmMfaSetup below — this prevents
-// someone from being locked into MFA by a secret they never actually
-// finished scanning/saving.
 const setupMfa = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
 
@@ -31,10 +25,6 @@ const setupMfa = asyncHandler(async (req, res) => {
   });
 });
 
-// Step 2 of enrollment: user submits a code from their authenticator app to
-// prove the secret was saved correctly. On success, MFA is switched on and
-// one-time backup codes are generated and shown exactly once — only their
-// hashes are persisted.
 const confirmMfaSetup = asyncHandler(async (req, res) => {
   const { token } = req.body;
   const user = await User.findById(req.user._id).select('+mfaSecret');
@@ -62,8 +52,6 @@ const confirmMfaSetup = asyncHandler(async (req, res) => {
   });
 });
 
-// Requires re-entering the password so a hijacked-but-still-logged-in
-// session can't silently turn off MFA protection.
 const disableMfa = asyncHandler(async (req, res) => {
   const { password } = req.body;
   const user = await User.findById(req.user._id).select('+password');
@@ -83,18 +71,9 @@ const disableMfa = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, message: 'MFA disabled successfully' });
 });
 
-// Step 2 of login when MFA is enabled. The short-lived mfaToken (issued by
-// login() in authController.js, purpose: 'mfa', 5 min expiry, signed with
-// the same role-scoped secret as a real session) proves the password was
-// already verified — this endpoint only needs to check the TOTP/backup
-// code, then issues the real session exactly like a normal login.
 const verifyMfaChallenge = asyncHandler(async (req, res) => {
   const { mfaToken, code } = req.body;
 
-  // We need the user's role to know which secret verifies this token, but
-  // we don't have it yet without decoding first — same read-then-verify
-  // pattern used in authMiddleware.js. jwt.decode() here is safe because
-  // the actual trust decision is the jwt.verify() call right after it.
   const unverifiedPayload = jwt.decode(mfaToken);
   if (!unverifiedPayload || unverifiedPayload.purpose !== 'mfa') {
     throw new ApiError(401, 'Invalid MFA session. Please log in again.');
@@ -138,7 +117,7 @@ const verifyMfaChallenge = asyncHandler(async (req, res) => {
 
   await user.registerSuccessfulLogin();
   await logEvent('MFA_LOGIN_SUCCESS', { user, req });
-  await sendTokenResponse(user, 200, res, req);
+  await issueSession(user, 200, res, req);
 });
 
 module.exports = { setupMfa, confirmMfaSetup, disableMfa, verifyMfaChallenge };

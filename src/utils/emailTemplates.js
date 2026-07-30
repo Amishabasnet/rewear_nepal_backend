@@ -189,6 +189,28 @@ const magicLinkTemplate = ({ name, loginUrl, expiresInMinutes = 15 }) =>
       </p>
     `,
   });
+const securityAlertTemplate = ({ event, identity, ip, ua, when, metadata, severity }) =>
+  renderShell({
+    title: 'Security Alert',
+    preheader: `Security alert: ${event}`,
+    bodyHtml: `
+      <h2 style="margin-top:0; color:#b91c1c;">🚨 Security Alert — ${severity.toUpperCase()}</h2>
+      <p style="font-size:14px; color:#374151; line-height:1.6;">
+        The following event was flagged as suspicious and warrants a look:
+      </p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:13px; color:#374151; border-collapse:collapse; margin:16px 0;">
+        <tr><td style="padding:6px 0; width:120px; color:#6b7280;">Event</td><td style="padding:6px 0;"><strong>${event}</strong></td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">User</td><td style="padding:6px 0;">${identity}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">IP address</td><td style="padding:6px 0;">${ip}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">Device / UA</td><td style="padding:6px 0;">${ua}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">Time</td><td style="padding:6px 0;">${when}</td></tr>
+        ${metadata ? `<tr><td style="padding:6px 0; color:#6b7280; vertical-align:top;">Details</td><td style="padding:6px 0; font-family:monospace; font-size:12px;">${JSON.stringify(metadata)}</td></tr>` : ''}
+      </table>
+      <p style="font-size:12px; color:#9ca3af; line-height:1.6;">
+        This is an automated alert from your application's security monitoring. Check the admin audit log for full context.
+      </p>
+    `,
+  });
 module.exports = {
   welcomeEmailTemplate,
   orderConfirmationTemplate,
@@ -196,4 +218,5 @@ module.exports = {
   orderStatusUpdateTemplate,
   orderDeliveredTemplate,
   magicLinkTemplate,
+  securityAlertTemplate,
 };

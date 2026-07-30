@@ -106,6 +106,14 @@ const resetPasswordValidationRules = [
 const passwordStrengthCheckValidationRules = [
   body('password').notEmpty().withMessage('Password is required'),
 ];
+const changePasswordValidationRules = [
+  body('currentPassword').notEmpty().withMessage('Current password is required'),
+  body('newPassword')
+    .notEmpty()
+    .withMessage('New password is required')
+    .custom(isStrongPassword)
+    .withMessage(STRONG_PASSWORD_MESSAGE),
+];
 const mfaConfirmValidationRules = [
   body('token')
     .trim()
@@ -139,6 +147,7 @@ module.exports = {
   forgotPasswordValidationRules,
   resetPasswordValidationRules,
   passwordStrengthCheckValidationRules,
+  changePasswordValidationRules,
   mfaConfirmValidationRules,
   mfaDisableValidationRules,
   mfaChallengeValidationRules,

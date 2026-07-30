@@ -5,7 +5,7 @@ const Address = require('../models/addressModel');
 const Coupon = require('../models/couponModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
-const { notifyOrderStatusUpdate, notifyAdminsNewOrder } = require('../utils/notificationService');
+const { notifyOrderStatusUpdate, notifyAdminsNewOrder, notifySellersProductSold } = require('../utils/notificationService');
 const { sendOrderConfirmationEmail, sendOrderStatusUpdateEmail } = require('../utils/emailService');
 const { validateCouponForUser } = require('../utils/couponService');
 
@@ -155,6 +155,7 @@ const placeOrder = asyncHandler(async (req, res) => {
 
   await notifyOrderStatusUpdate(order); // "Order Placed" for the customer
   await notifyAdminsNewOrder(order); // "New Order Received" for every admin
+  await notifySellersProductSold(order); // "Your item sold!" for each affected seller
 
   await sendOrderConfirmationEmail(req.user, order);
 

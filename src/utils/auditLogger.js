@@ -1,41 +1,36 @@
 const AuditLog = require('../models/auditLogModel');
-const User = require('../models/userModel');
-const Notification = require('../models/notificationModel');
+const { sendSecurityAlert } = require('./securityAlertService');
 
-const logEvent = async (event, { user, email, req, success = true, details = {} } = {}) => {
+const ALERT_EVENTS = {
+  ACCOUNT_LOCKED: 'high',
+  LOGIN_ATTEMPT_ON_LOCKED_ACCOUNT: 'high',
+  REFRESH_TOKEN_REUSE_DETECTED: 'critical',
+  MFA_LOGIN_FAILED: 'medium',
+  MFA_DISABLE_FAILED: 'medium',
+  ADMIN_USER_ROLE_CHANGED: 'high',
+  ADMIN_USER_DELETED: 'high',
+};
+
+const logEvent = async (event, { user, req, success = true, metadata } = {}) => {
   try {
     await AuditLog.create({
       event,
-      user: user?._id || user || null,
-      email: email || user?.email || null,
-      ip: req?.ip || null,
-      userAgent: req?.headers?.['user-agent'] || null,
+      user: user?._id,
       success,
-      details,
+      ip: req?.ip,
+      userAgent: req?.headers?.['user-agent'] || '',
+      metadata,
     });
   } catch (err) {
-    console.error(`Failed to write audit log for "${event}": ${err.message}`);
+    console.error(`Failed to write audit log for event "${event}": ${err.message}`);
+  }
+
+  const severity = ALERT_EVENTS[event];
+  if (severity) {
+    sendSecurityAlert({ event, user, req, metadata, severity }).catch((err) => {
+      console.error(`Security alert dispatch threw for "${event}": ${err.message}`);
+    });
   }
 };
 
-const notifyAdminsSecurityAlert = async (title, message, details = {}) => {
-  try {
-    const admins = await User.find({ role: 'admin' }).select('_id');
-    await Promise.all(
-      admins.map((admin) =>
-        Notification.create({
-          user: admin._id,
-          title,
-          message,
-          type: 'security_alert',
-        }).catch((err) => console.error(`Failed to alert admin ${admin._id}: ${err.message}`))
-      )
-    );
-  } catch (err) {
-    console.error(`Failed to send security alert to admins: ${err.message}`);
-  }
-
-  await logEvent('SECURITY_ALERT_SENT', { success: false, details: { title, ...details } });
-};
-
-module.exports = { logEvent, notifyAdminsSecurityAlert };
+module.exports = { logEvent };
