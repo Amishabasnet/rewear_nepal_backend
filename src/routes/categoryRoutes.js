@@ -7,6 +7,7 @@ const {
   deleteCategory,
 } = require('../controllers/categoryController');
 const { protect, optionalAuth, authorize } = require('../middleware/authMiddleware');
+const { verifyCsrfToken } = require('../middleware/csrf');
 const { validate } = require('../validators/authValidator');
 const {
   createCategoryValidationRules,
@@ -21,12 +22,29 @@ router.get('/', optionalAuth, getCategoriesValidationRules, validate, getCategor
 router.get('/:id', optionalAuth, categoryIdParamValidationRules, validate, getCategoryById);
 
 // Admin-only routes
-router.post('/', protect, authorize('admin'), createCategoryValidationRules, validate, createCategory);
-router.put('/:id', protect, authorize('admin'), updateCategoryValidationRules, validate, updateCategory);
+router.post(
+  '/',
+  protect,
+  authorize('admin'),
+  verifyCsrfToken,
+  createCategoryValidationRules,
+  validate,
+  createCategory
+);
+router.put(
+  '/:id',
+  protect,
+  authorize('admin'),
+  verifyCsrfToken,
+  updateCategoryValidationRules,
+  validate,
+  updateCategory
+);
 router.delete(
   '/:id',
   protect,
   authorize('admin'),
+  verifyCsrfToken,
   categoryIdParamValidationRules,
   validate,
   deleteCategory

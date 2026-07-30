@@ -1,5 +1,6 @@
 const Notification = require('../models/notificationModel');
 const User = require('../models/userModel');
+const Product = require('../models/productModel');
 const STATUS_TEMPLATES = {
   Pending: {
     title: 'Order Placed',
@@ -63,4 +64,45 @@ const notifyAdminsNewOrder = async (order) => {
     console.error(`Failed to notify admins of new order: ${err.message}`);
   }
 };
-module.exports = { notifyOrderStatusUpdate, notifyAdminsNewOrder };
+// Order items only store the product's id/name/price snapshot, not who
+// sold it, so we look products back up to find each item's seller. Items
+// are grouped by seller first so someone with three items in one order
+// gets a single notification, not three separate ones.
+const notifySellersProductSold = async (order) => {
+  try {
+    const productIds = order.orderItems.map((item) => item.product);
+    const products = await Product.find({ _id: { $in: productIds } }).select('seller');
+    const sellerByProductId = new Map(
+      products.map((p) => [p._id.toString(), p.seller ? p.seller.toString() : null])
+    );
+
+    const itemsBySeller = new Map();
+    for (const item of order.orderItems) {
+      const sellerId = sellerByProductId.get(item.product.toString());
+      if (!sellerId) continue;
+      if (!itemsBySeller.has(sellerId)) itemsBySeller.set(sellerId, []);
+      itemsBySeller.get(sellerId).push(item);
+    }
+
+    const shortId = order._id.toString().slice(-8);
+
+    await Promise.all(
+      Array.from(itemsBySeller.entries()).map(([sellerId, items]) => {
+        const itemsLabel =
+          items.length === 1 ? `"${items[0].name}"` : `${items.length} of your listings`;
+
+        return Notification.create({
+          user: sellerId,
+          title: 'Your item sold!',
+          message: `${itemsLabel} sold in order #${shortId}. Check your Seller Orders page for details.`,
+          type: 'product_sold',
+          relatedOrder: order._id,
+        }).catch((err) => console.error(`Failed to notify seller ${sellerId}: ${err.message}`));
+      })
+    );
+  } catch (err) {
+    console.error(`Failed to notify sellers of sold products: ${err.message}`);
+  }
+};
+
+module.exports = { notifyOrderStatusUpdate, notifyAdminsNewOrder, notifySellersProductSold };

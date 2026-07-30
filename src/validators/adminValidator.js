@@ -39,8 +39,11 @@ const getAllUsersValidationRules = [
     .optional()
     .isInt({ min: 1, max: 100 })
     .withMessage('limit must be an integer between 1 and 100'),
-  query('role').optional().isIn(['buyer', 'admin']).withMessage('role must be "buyer" or "admin"'),
-  query('search').optional().trim().escape(),
+  query('role')
+    .optional({ checkFalsy: true })
+    .isIn(['buyer', 'admin'])
+    .withMessage('role must be "buyer" or "admin"'),
+  query('search').optional({ checkFalsy: true }).trim().escape(),
 ];
 const userIdParamValidationRules = [
   param('id').isMongoId().withMessage('Invalid user id'),

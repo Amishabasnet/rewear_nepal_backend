@@ -3,7 +3,7 @@ const User = require('../models/userModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
 const { sendMagicLinkEmail } = require('../utils/emailService');
-const { sendTokenResponse } = require('../utils/generateToken');
+const { issueSession } = require('../utils/sessionService');
 const requestPasswordlessLogin = asyncHandler(async (req, res) => {
   const { email } = req.body;
 
@@ -54,7 +54,7 @@ const verifyPasswordlessLogin = asyncHandler(async (req, res) => {
     throw new ApiError(403, 'Your account has been blocked. Please contact support.');
   }
 
-  sendTokenResponse(user, 200, res, req);
+  await issueSession(user, 200, res, req);
 });
 
 module.exports = { requestPasswordlessLogin, verifyPasswordlessLogin };

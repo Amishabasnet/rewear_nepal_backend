@@ -1,7 +1,7 @@
 const User = require('../models/userModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
-const { sendTokenResponse } = require('../utils/generateToken');
+const { issueSession, revokeAllForUser } = require('../utils/sessionService');
 
 const toProfileResponse = (user) => ({
   _id: user._id,
@@ -100,7 +100,11 @@ const changePassword = asyncHandler(async (req, res) => {
   user.tokenVersion = (user.tokenVersion || 0) + 1;
   await user.save();
 
-  sendTokenResponse(user, 200, res, req);
+  // Revoke every refresh token too, otherwise another device's refresh
+  // token could mint a new access token with the updated tokenVersion and
+  // quietly stay logged in. Re-issue a fresh session for this device.
+  await revokeAllForUser(user._id);
+  await issueSession(user, 200, res, req);
 });
 
 module.exports = {

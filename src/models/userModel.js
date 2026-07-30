@@ -105,6 +105,26 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    mfaEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    // Encrypted at rest via the same encrypt/decrypt helpers used for
+    // phone/address/city. Never returned by default queries — controllers
+    // must explicitly .select('+mfaSecret') when they need it.
+    mfaSecret: {
+      type: String,
+      select: false,
+      set: (value) => (value === undefined || value === null ? value : encrypt(value)),
+      get: (value) => (value === undefined || value === null ? value : decrypt(value)),
+    },
+    // Hashes only — plaintext backup codes are shown to the user once at
+    // enrollment and never stored.
+    mfaBackupCodes: {
+      type: [String],
+      default: [],
+      select: false,
+    },
     resetPasswordToken: {
       type: String,
       select: false,

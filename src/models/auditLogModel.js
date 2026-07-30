@@ -5,38 +5,35 @@ const auditLogSchema = new mongoose.Schema(
     event: {
       type: String,
       required: true,
-      index: true,
+      trim: true,
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      default: null,
-      index: true,
-    },
-    email: {
-      type: String,
-      default: null,
-    },
-    ip: {
-      type: String,
-      default: null,
-    },
-    userAgent: {
-      type: String,
-      default: null,
     },
     success: {
       type: Boolean,
       default: true,
     },
-    details: {
+    ip: {
+      type: String,
+      default: '',
+    },
+    userAgent: {
+      type: String,
+      default: '',
+    },
+    metadata: {
       type: mongoose.Schema.Types.Mixed,
-      default: {},
+      default: undefined,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: { createdAt: true, updatedAt: false },
+  }
 );
 
-auditLogSchema.index({ createdAt: -1 });
+auditLogSchema.index({ user: 1, createdAt: -1 });
+auditLogSchema.index({ event: 1, createdAt: -1 });
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

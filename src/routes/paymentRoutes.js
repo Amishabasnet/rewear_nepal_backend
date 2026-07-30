@@ -5,6 +5,7 @@ const {
   getPaymentByOrder,
 } = require('../controllers/paymentController');
 const { protect } = require('../middleware/authMiddleware');
+const { verifyCsrfToken } = require('../middleware/csrf');
 const { validate } = require('../validators/authValidator');
 const {
   createPaymentValidationRules,
@@ -17,8 +18,20 @@ const router = express.Router();
 // Payments always belong to a specific logged-in user.
 router.use(protect);
 
-router.post('/create', createPaymentValidationRules, validate, createPayment);
-router.post('/verify', verifyPaymentValidationRules, validate, verifyPayment);
+router.post(
+  '/create',
+  verifyCsrfToken,
+  createPaymentValidationRules,
+  validate,
+  createPayment
+);
+router.post(
+  '/verify',
+  verifyCsrfToken,
+  verifyPaymentValidationRules,
+  validate,
+  verifyPayment
+);
 router.get('/:orderId', orderIdParamValidationRules, validate, getPaymentByOrder);
 
 module.exports = router;

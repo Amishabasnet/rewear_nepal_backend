@@ -1,28 +1,24 @@
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
+const { sendTokenResponse, issueMfaToken } = require('../utils/generateToken.js');
+const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService');
+const { calculatePasswordStrength } = require('../utils/passwordPolicy');
+const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
+const { verifyCaptcha } = require('../utils/captchaService');
+const { logEvent } = require('../utils/auditLogger');
 const {
-  sendTokenResponse,
-  clearAuthCookies,
-  getSecretForRole,
-} = require('../utils/generateToken.js');
-const {
+  REFRESH_COOKIE_NAME,
+  getRefreshCookieOptions,
+  issueSession,
+  clearRefreshCookie,
   rotateRefreshToken,
   revokeRefreshToken,
   revokeAllForUser,
   REUSE_DETECTED,
   EXPIRED,
-} = require('../utils/refreshTokenService');
-const { sendWelcomeEmail, sendPasswordResetEmail } = require('../utils/emailService');
-const { calculatePasswordStrength } = require('../utils/passwordPolicy');
-const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
-const { verifyCaptcha } = require('../utils/captchaService');
-const { logEvent, notifyAdminsSecurityAlert } = require('../utils/auditLogger');
-
-const MAX_LOGIN_ATTEMPTS = Number(process.env.MAX_LOGIN_ATTEMPTS) || 5;
-
+} = require('../utils/sessionService');
 const register = asyncHandler(async (req, res) => {
   const { name, email, password, phone, role, captchaToken } = req.body;
 
@@ -33,22 +29,10 @@ const register = asyncHandler(async (req, res) => {
 
   const existingUser = await User.findOne({ email });
   if (existingUser) {
-    await logEvent('REGISTER_FAILED', {
-      email,
-      req,
-      success: false,
-      details: { reason: 'duplicate_email' },
-    });
     throw new ApiError(400, 'An account with this email already exists');
   }
 
   if (role === 'admin' && !isAdminEmail(email)) {
-    await logEvent('REGISTER_FAILED', {
-      email,
-      req,
-      success: false,
-      details: { reason: 'admin_email_domain_rejected' },
-    });
     throw new ApiError(
       403,
       `Admin accounts can only be created with a ${ADMIN_EMAIL_DOMAIN} email address`
@@ -64,9 +48,8 @@ const register = asyncHandler(async (req, res) => {
   });
 
   await sendWelcomeEmail(user);
-  await logEvent('REGISTER_SUCCESS', { user, req });
 
-  await sendTokenResponse(user, 201, res, req);
+  await issueSession(user, 201, res, req);
 });
 
 const login = asyncHandler(async (req, res) => {
@@ -80,17 +63,16 @@ const login = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email }).select('+password +loginAttempts +lockUntil');
 
   if (!user) {
-    await logEvent('LOGIN_FAILED', {
-      email,
-      req,
-      success: false,
-      details: { reason: 'unknown_email' },
-    });
     throw new ApiError(401, 'Invalid email or password');
   }
 
   if (user.isLocked()) {
-    await logEvent('LOGIN_BLOCKED_ACCOUNT_LOCKED', { user, req, success: false });
+    await logEvent('LOGIN_ATTEMPT_ON_LOCKED_ACCOUNT', {
+      user,
+      req,
+      success: false,
+      metadata: { email: user.email },
+    });
     throw new ApiError(
       423,
       'This account is temporarily locked due to too many failed login attempts. Please try again later or reset your password.'
@@ -98,39 +80,28 @@ const login = asyncHandler(async (req, res) => {
   }
 
   if (!(await user.matchPassword(password))) {
-    const attemptsBefore = user.loginAttempts || 0;
+    const wasLockedBefore = user.isLocked();
     await user.registerFailedLogin();
 
-    await logEvent('LOGIN_FAILED', {
-      user,
-      req,
-      success: false,
-      details: { reason: 'bad_password' },
-    });
-
-    // The failed attempt we just registered may have been the one that
-    // tipped the account into lockout — if so, that's a real-time
-    // brute-force signal worth surfacing to admins immediately, not just
-    // recording quietly in the log.
-    if (attemptsBefore + 1 >= MAX_LOGIN_ATTEMPTS) {
-      await logEvent('ACCOUNT_LOCKED', { user, req, success: false });
-      await notifyAdminsSecurityAlert(
-        'Account locked — possible brute-force attempt',
-        `The account ${user.email} was locked after ${MAX_LOGIN_ATTEMPTS} failed login attempts.`,
-        { userId: user._id.toString(), ip: req.ip }
-      );
+    if (!wasLockedBefore && user.isLocked()) {
+      // This attempt is the one that tipped the account over the
+      // MAX_LOGIN_ATTEMPTS threshold — a strong signal of an active
+      // brute-force/credential-stuffing attempt, so it gets a real-time
+      // alert, not just an audit-log entry.
+      await logEvent('ACCOUNT_LOCKED', {
+        user,
+        req,
+        success: false,
+        metadata: { email: user.email },
+      });
+    } else {
+      await logEvent('LOGIN_FAILED', { user, req, success: false, metadata: { email: user.email } });
     }
 
     throw new ApiError(401, 'Invalid email or password');
   }
 
   if (user.role === 'admin' && !isAdminEmail(user.email)) {
-    await logEvent('LOGIN_FAILED', {
-      user,
-      req,
-      success: false,
-      details: { reason: 'admin_email_domain_rejected' },
-    });
     throw new ApiError(
       403,
       `Admin accounts must use a ${ADMIN_EMAIL_DOMAIN} email address. Please contact support.`
@@ -138,92 +109,104 @@ const login = asyncHandler(async (req, res) => {
   }
 
   if (user.isBlocked) {
-    await logEvent('LOGIN_BLOCKED_ACCOUNT_DISABLED', { user, req, success: false });
     throw new ApiError(403, 'Your account has been blocked. Please contact support.');
   }
 
-  await user.registerSuccessfulLogin();
-
   if (user.mfaEnabled) {
-    // Password was correct, but don't issue a real session yet — only a
-    // short-lived, single-purpose token that verifyMfaChallenge (in
-    // mfaController.js) will exchange for the real session once the TOTP
-    // or backup code is verified. Signed with the same role-scoped secret
-    // as a real session token, for consistency with dual-secret signing.
-    const mfaToken = jwt.sign(
-      { id: user._id, purpose: 'mfa' },
-      getSecretForRole(user.role),
-      { expiresIn: '5m' }
-    );
-    await logEvent('LOGIN_MFA_CHALLENGE_ISSUED', { user, req });
-    return res.status(200).json({ success: true, mfaRequired: true, mfaToken });
+    // Password is verified, but the session isn't issued yet — hand back
+    // a short-lived mfaToken instead. registerSuccessfulLogin() (which
+    // clears lockout counters) happens after the MFA code is confirmed,
+    // in verifyMfaChallenge, so a stolen password alone can't reset them.
+    const mfaToken = issueMfaToken(user);
+    await logEvent('MFA_CHALLENGE_ISSUED', { user, req });
+
+    return res.status(200).json({
+      success: true,
+      mfaRequired: true,
+      message: 'Password verified. Please provide your authentication code to complete login.',
+      data: { mfaToken },
+    });
   }
 
+  await user.registerSuccessfulLogin();
   await logEvent('LOGIN_SUCCESS', { user, req });
-  await sendTokenResponse(user, 200, res, req);
+
+  await issueSession(user, 200, res, req);
 });
 
-// Refresh: exchanges a valid (rotating) refresh token for a new access
-// token + a new refresh token. Called by the frontend automatically when an
-// access token has expired, so the user stays logged in without needing to
-// keep a long-lived access token around.
+// Re-issues an access token using the long-lived refresh token instead of
+// the access token itself — so a stolen access token can't be used to
+// mint a new one once it expires, and the session can be kept alive for
+// the full refresh-token lifetime rather than only the access token's.
+//
+// Flow: presented refresh token -> rotateRefreshToken() looks it up by
+// hash, rejects it if expired/unknown, and — critically — if this exact
+// token has already been rotated once before (revokedAt is set), that
+// means it's being replayed (e.g. stolen and used after the legitimate
+// client already rotated past it). That's treated as reuse: every
+// refresh token for the user is revoked immediately and the caller must
+// log in again, so a leaked refresh token has at most a one-time window.
 const refresh = asyncHandler(async (req, res) => {
-  const presented = req.cookies?.refreshToken;
-  if (!presented) {
-    throw new ApiError(401, 'No refresh token provided. Please log in again.');
+  const presentedRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+
+  if (!presentedRefreshToken) {
+    throw new ApiError(401, 'Not authorized, no refresh token provided');
   }
 
+  let rotated;
   try {
-    const { newToken, user } = await rotateRefreshToken(presented, req);
-    const { generateAccessToken, setAuthCookies } = require('../utils/generateToken');
-    const accessToken = generateAccessToken(user, req);
-    setAuthCookies(res, accessToken, newToken);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        mfaEnabled: user.mfaEnabled,
-        createdAt: user.createdAt,
-      },
-    });
+    rotated = await rotateRefreshToken(presentedRefreshToken, req);
   } catch (err) {
-    clearAuthCookies(res);
+    clearRefreshCookie(res);
+    res.clearCookie('token', { path: '/' });
 
     if (err.code === REUSE_DETECTED) {
-      await logEvent('REFRESH_TOKEN_REUSE_DETECTED', {
-        user: err.user,
-        req,
-        success: false,
-      });
-      await notifyAdminsSecurityAlert(
-        'Refresh token reuse detected — possible session theft',
-        `A previously-used refresh token was replayed for ${err.user?.email || 'a user'}. All of their sessions have been revoked.`,
-        { userId: err.user?._id?.toString(), ip: req.ip }
-      );
+      await logEvent('REFRESH_TOKEN_REUSE_DETECTED', { user: err.user, req, success: false });
       throw new ApiError(
         401,
-        'Session invalidated due to suspicious activity. Please log in again.'
+        'A previously used refresh token was replayed. For your security, all sessions have been logged out — please log in again.'
       );
     }
 
     if (err.code === EXPIRED) {
-      throw new ApiError(401, 'Session expired. Please log in again.');
+      throw new ApiError(401, 'Your session has expired. Please log in again.');
     }
 
-    throw new ApiError(401, 'Invalid session. Please log in again.');
+    throw new ApiError(401, 'Not authorized, invalid refresh token');
   }
+
+  const { newToken, user } = rotated;
+
+  if (user.isBlocked) {
+    await revokeAllForUser(user._id);
+    clearRefreshCookie(res);
+    res.clearCookie('token', { path: '/' });
+    throw new ApiError(403, 'Your account has been blocked. Please contact support.');
+  }
+
+  // The refresh token was already rotated above (one-time use); just set
+  // the new one and hand back a fresh access token the same way a normal
+  // login would.
+  res.cookie(REFRESH_COOKIE_NAME, newToken, getRefreshCookieOptions());
+  sendTokenResponse(user, 200, res, req);
 });
 
 const logout = asyncHandler(async (req, res) => {
-  await revokeRefreshToken(req.cookies?.refreshToken);
-  clearAuthCookies(res);
+  // Revoke just this device's refresh token so it can't be replayed after
+  // logout, then clear both cookies.
+  const presentedRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+  if (presentedRefreshToken) {
+    await revokeRefreshToken(presentedRefreshToken);
+  }
 
-  await logEvent('LOGOUT', { user: req.user, req });
+  res.cookie('token', 'none', {
+    expires: new Date(Date.now() + 10 * 1000),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.COOKIE_SAME_SITE || 'lax',
+    path: '/',
+  });
+  clearRefreshCookie(res);
 
   res.status(200).json({
     success: true,
@@ -236,14 +219,20 @@ const logoutAllDevices = asyncHandler(async (req, res) => {
   user.tokenVersion = (user.tokenVersion || 0) + 1;
   await user.save({ validateBeforeSave: false });
 
-  // Invalidates all outstanding access tokens (via tokenVersion) AND all
-  // outstanding refresh tokens (so a stolen refresh token can't mint new
-  // access tokens either).
+  // Bumping tokenVersion invalidates every outstanding access token, but a
+  // still-valid refresh token could otherwise mint a new one with the
+  // current tokenVersion and quietly restore access — so every refresh
+  // token for this user must be revoked too.
   await revokeAllForUser(user._id);
 
-  clearAuthCookies(res);
-
-  await logEvent('LOGOUT_ALL_DEVICES', { user, req });
+  res.cookie('token', 'none', {
+    expires: new Date(Date.now() + 10 * 1000),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.COOKIE_SAME_SITE || 'lax',
+    path: '/',
+  });
+  clearRefreshCookie(res);
 
   res.status(200).json({
     success: true,
@@ -267,7 +256,6 @@ const getProfile = asyncHandler(async (req, res) => {
       email: user.email,
       phone: user.phone,
       role: user.role,
-      mfaEnabled: user.mfaEnabled,
       createdAt: user.createdAt,
     },
   });
@@ -301,10 +289,39 @@ const updateProfile = asyncHandler(async (req, res) => {
       email: updatedUser.email,
       phone: updatedUser.phone,
       role: updatedUser.role,
-      mfaEnabled: updatedUser.mfaEnabled,
       createdAt: updatedUser.createdAt,
     },
   });
+});
+
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const user = await User.findById(req.user._id).select('+password +passwordHistory');
+
+  if (!(await user.matchPassword(currentPassword))) {
+    throw new ApiError(401, 'Current password is incorrect');
+  }
+
+  if (await user.isPasswordReused(newPassword)) {
+    throw new ApiError(
+      400,
+      'You cannot reuse your current or a recently used password. Please choose a different one.'
+    );
+  }
+
+  user.archiveCurrentPassword();
+  user.password = newPassword;
+  // Bump tokenVersion so any other active sessions are logged out — same
+  // as resetPassword — since the old password may have been compromised.
+  user.tokenVersion = (user.tokenVersion || 0) + 1;
+  await user.save();
+
+  // Also revoke every refresh token, otherwise another device's still-valid
+  // refresh token could mint a fresh access token carrying the new
+  // tokenVersion and quietly stay logged in. Re-issue a brand new session
+  // for the device that just changed the password.
+  await revokeAllForUser(user._id);
+  await issueSession(user, 200, res, req);
 });
 
 const getAllUsers = asyncHandler(async (req, res) => {
@@ -326,14 +343,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
 
   const user = await User.findOne({ email });
   if (!user) {
-    // Deliberately returns the same generic response either way — otherwise
-    // this endpoint would let anyone enumerate which emails have accounts.
-    await logEvent('PASSWORD_RESET_REQUESTED', {
-      email,
-      req,
-      success: false,
-      details: { reason: 'unknown_email' },
-    });
     return res.status(200).json(genericResponse);
   }
 
@@ -351,8 +360,6 @@ const forgotPassword = asyncHandler(async (req, res) => {
     throw new ApiError(500, 'Could not send password reset email — please try again later');
   }
 
-  await logEvent('PASSWORD_RESET_REQUESTED', { user, req });
-
   res.status(200).json(genericResponse);
 });
 
@@ -365,11 +372,6 @@ const resetPassword = asyncHandler(async (req, res) => {
   }).select('+resetPasswordToken +resetPasswordExpire +password +passwordHistory');
 
   if (!user) {
-    await logEvent('PASSWORD_RESET_FAILED', {
-      req,
-      success: false,
-      details: { reason: 'invalid_or_expired_token' },
-    });
     throw new ApiError(400, 'Password reset token is invalid or has expired');
   }
 
@@ -387,14 +389,10 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.tokenVersion = (user.tokenVersion || 0) + 1;
   await user.save();
 
-  // A password reset is a good moment to also kill every other outstanding
-  // session/refresh token — if the reset was prompted by a compromised
-  // account, this closes out whatever session the attacker had too.
+  // Revoke every refresh token too — otherwise a session from before the
+  // reset could still mint fresh access tokens via /auth/refresh.
   await revokeAllForUser(user._id);
-
-  await logEvent('PASSWORD_RESET_COMPLETED', { user, req });
-
-  await sendTokenResponse(user, 200, res, req);
+  await issueSession(user, 200, res, req);
 });
 
 const checkPasswordStrength = asyncHandler(async (req, res) => {
@@ -410,6 +408,7 @@ module.exports = {
   logoutAllDevices,
   getProfile,
   updateProfile,
+  changePassword,
   getAllUsers,
   forgotPassword,
   resetPassword,
