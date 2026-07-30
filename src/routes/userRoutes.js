@@ -6,6 +6,7 @@ const {
 } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 const { enforcePasswordNotExpired } = require('../middleware/passwordExpiry');
+const { verifyCsrfToken } = require('../middleware/csrf');
 const { validate } = require('../validators/authValidator');
 const {
   updateUserProfileValidationRules,
@@ -19,8 +20,20 @@ router.use(protect);
 router
   .route('/profile')
   .get(enforcePasswordNotExpired, getUserProfile)
-  .put(enforcePasswordNotExpired, updateUserProfileValidationRules, validate, updateUserProfile);
+  .put(
+    enforcePasswordNotExpired,
+    verifyCsrfToken,
+    updateUserProfileValidationRules,
+    validate,
+    updateUserProfile
+  );
 
-router.put('/change-password', changePasswordValidationRules, validate, changePassword);
+router.put(
+  '/change-password',
+  verifyCsrfToken,
+  changePasswordValidationRules,
+  validate,
+  changePassword
+);
 
 module.exports = router;

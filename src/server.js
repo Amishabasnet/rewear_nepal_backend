@@ -11,6 +11,7 @@ const connectDB = require('./config/db');
 const notFound = require('./middleware/notFound');
 const errorHandler = require('./middleware/errorHandler');
 const { ipAccessControl, globalLimiter, sensitiveActionLimiter } = require('./middleware/security');
+const { attachCsrfToken, verifyCsrfToken } = require('./middleware/csrf');
 const authRoutes = require('./routes/authRoutes');
 const mfaRoutes = require('./routes/mfaRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -54,6 +55,10 @@ app.use(cookieParser());
 app.use(ipAccessControl);
 app.use(globalLimiter);
 
+// CSRF protection 
+app.use(attachCsrfToken);
+app.use(verifyCsrfToken);
+
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
@@ -67,6 +72,12 @@ app.get('/', (req, res) => {
     success: true,
     message: 'Auth API is running',
   });
+});
+
+// Lets the SPA explicitly fetch/refresh its CSRF token on bootstrap
+// (also already set as a cookie by attachCsrfToken above on this same request).
+app.get('/api/security/csrf-token', (req, res) => {
+  res.status(200).json({ success: true, csrfToken: req.csrfToken });
 });
 
 // Routes 

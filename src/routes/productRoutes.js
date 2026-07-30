@@ -13,6 +13,7 @@ const { addReview, getProductReviews } = require('../controllers/reviewControlle
 const { createReport } = require('../controllers/reportController');
 const { protect } = require('../middleware/authMiddleware');
 const { uploadProductImages } = require('../middleware/uploadMiddleware');
+const { verifyCsrfToken } = require('../middleware/csrf');
 const { validate } = require('../validators/authValidator');
 const {
   createProductValidationRules,
@@ -40,6 +41,7 @@ router.get('/:id', getProductById);
 router.post(
   '/',
   protect,
+  verifyCsrfToken,
   uploadProductImages,
   createProductValidationRules,
   validate,
@@ -50,21 +52,23 @@ router.post(
 router.put(
   '/:id',
   protect,
+  verifyCsrfToken,
   uploadProductImages,
   updateProductValidationRules,
   validate,
   updateProduct
 );
 
-router.delete('/:id', protect, deleteProduct);
+router.delete('/:id', protect, verifyCsrfToken, deleteProduct);
 
-router.patch('/:id/stock', protect, updateStock);
+router.patch('/:id/stock', protect, verifyCsrfToken, updateStock);
 
 // Reviews nested under a product
 router.get('/:id/reviews', productIdParamValidationRules, validate, getProductReviews);
 router.post(
   '/:id/reviews',
   protect,
+  verifyCsrfToken,
   createReviewValidationRules,
   validate,
   addReview
@@ -74,6 +78,7 @@ router.post(
 router.post(
   '/:id/report',
   protect,
+  verifyCsrfToken,
   createReportValidationRules,
   validate,
   createReport

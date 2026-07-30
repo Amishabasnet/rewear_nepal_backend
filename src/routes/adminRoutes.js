@@ -1,4 +1,5 @@
 const express = require('express');
+
 const {
   getStats,
   getRecentOrders,
@@ -16,8 +17,16 @@ const {
   rejectProduct,
   deleteProductAdmin,
 } = require('../controllers/adminController');
+
 const { protect, authorize } = require('../middleware/authMiddleware');
+
+// Import CSRF middleware
+const {
+  verifyCsrfToken,
+} = require('../middleware/csrf');
+
 const { validate } = require('../validators/authValidator');
+
 const {
   statsValidationRules,
   recentOrdersValidationRules,
@@ -34,25 +43,122 @@ const {
 
 const router = express.Router();
 
+// All routes require an authenticated administrator
 router.use(protect, authorize('admin'));
 
-router.get('/dashboard', dashboardValidationRules, validate, getDashboard);
-router.get('/stats', statsValidationRules, validate, getStats);
-router.get('/recent-orders', recentOrdersValidationRules, validate, getRecentOrders);
-router.get('/low-stock-products', lowStockValidationRules, validate, getLowStockProducts);
+// Read-only dashboard routes
+router.get(
+  '/dashboard',
+  dashboardValidationRules,
+  validate,
+  getDashboard
+);
 
-router.get('/users', getAllUsersValidationRules, validate, getAllUsers);
-router.get('/users/:id', userIdParamValidationRules, validate, getUserById);
-router.put('/users/:id', updateUserRoleValidationRules, validate, updateUserRole);
-router.put('/users/:id/block', toggleBlockUserValidationRules, validate, toggleBlockUser);
-router.delete('/users/:id', userIdParamValidationRules, validate, deleteUser);
+router.get(
+  '/stats',
+  statsValidationRules,
+  validate,
+  getStats
+);
 
-// Product moderation — "pending" must be registered before "/:id"
-router.get('/products/pending', getAllProductsValidationRules, validate, getPendingProducts);
-router.get('/products', getAllProductsValidationRules, validate, getAllProducts);
-router.get('/products/:id', productIdParamValidationRules, validate, getProductDetailAdmin);
-router.put('/products/:id/approve', productIdParamValidationRules, validate, approveProduct);
-router.put('/products/:id/reject', rejectProductValidationRules, validate, rejectProduct);
-router.delete('/products/:id', productIdParamValidationRules, validate, deleteProductAdmin);
+router.get(
+  '/recent-orders',
+  recentOrdersValidationRules,
+  validate,
+  getRecentOrders
+);
+
+router.get(
+  '/low-stock-products',
+  lowStockValidationRules,
+  validate,
+  getLowStockProducts
+);
+
+// User management
+router.get(
+  '/users',
+  getAllUsersValidationRules,
+  validate,
+  getAllUsers
+);
+
+router.get(
+  '/users/:id',
+  userIdParamValidationRules,
+  validate,
+  getUserById
+);
+
+router.put(
+  '/users/:id',
+  verifyCsrfToken,
+  updateUserRoleValidationRules,
+  validate,
+  updateUserRole
+);
+
+router.put(
+  '/users/:id/block',
+  verifyCsrfToken,
+  toggleBlockUserValidationRules,
+  validate,
+  toggleBlockUser
+);
+
+router.delete(
+  '/users/:id',
+  verifyCsrfToken,
+  userIdParamValidationRules,
+  validate,
+  deleteUser
+);
+
+// Product moderation
+// "pending" must be registered before "/:id"
+router.get(
+  '/products/pending',
+  getAllProductsValidationRules,
+  validate,
+  getPendingProducts
+);
+
+router.get(
+  '/products',
+  getAllProductsValidationRules,
+  validate,
+  getAllProducts
+);
+
+router.get(
+  '/products/:id',
+  productIdParamValidationRules,
+  validate,
+  getProductDetailAdmin
+);
+
+router.put(
+  '/products/:id/approve',
+  verifyCsrfToken,
+  productIdParamValidationRules,
+  validate,
+  approveProduct
+);
+
+router.put(
+  '/products/:id/reject',
+  verifyCsrfToken,
+  rejectProductValidationRules,
+  validate,
+  rejectProduct
+);
+
+router.delete(
+  '/products/:id',
+  verifyCsrfToken,
+  productIdParamValidationRules,
+  validate,
+  deleteProductAdmin
+);
 
 module.exports = router;

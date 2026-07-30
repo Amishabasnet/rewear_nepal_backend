@@ -7,6 +7,7 @@ const {
 } = require('../controllers/mfaController');
 const { protect } = require('../middleware/authMiddleware');
 const { authLimiter } = require('../middleware/security');
+const { verifyCsrfToken } = require('../middleware/csrf');
 const { validate } = require('../validators/authValidator');
 const {
   confirmMfaSetupValidationRules,
@@ -21,6 +22,7 @@ const router = express.Router();
 router.post(
   '/verify',
   authLimiter,
+  verifyCsrfToken,
   verifyMfaChallengeValidationRules,
   validate,
   verifyMfaChallenge
@@ -28,8 +30,22 @@ router.post(
 
 // Private (require a valid JWT — the user is already logged in and is
 // enrolling in, or managing, MFA on their own account).
-router.post('/setup', protect, setupMfa);
-router.post('/setup/confirm', protect, confirmMfaSetupValidationRules, validate, confirmMfaSetup);
-router.post('/disable', protect, disableMfaValidationRules, validate, disableMfa);
+router.post('/setup', protect, verifyCsrfToken, setupMfa);
+router.post(
+  '/setup/confirm',
+  protect,
+  verifyCsrfToken,
+  confirmMfaSetupValidationRules,
+  validate,
+  confirmMfaSetup
+);
+router.post(
+  '/disable',
+  protect,
+  verifyCsrfToken,
+  disableMfaValidationRules,
+  validate,
+  disableMfa
+);
 
 module.exports = router;

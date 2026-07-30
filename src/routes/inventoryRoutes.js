@@ -5,6 +5,7 @@ const {
   getOutOfStockProducts,
 } = require('../controllers/inventoryController');
 const { protect, authorize } = require('../middleware/authMiddleware');
+const { verifyCsrfToken } = require('../middleware/csrf');
 const { validate } = require('../validators/authValidator');
 const { updateInventoryValidationRules } = require('../validators/inventoryValidator');
 
@@ -15,6 +16,12 @@ router.use(protect, authorize('admin'));
 
 router.get('/low-stock', getLowStockProducts);
 router.get('/out-of-stock', getOutOfStockProducts);
-router.put('/:productId', updateInventoryValidationRules, validate, updateInventory);
+router.put(
+  '/:productId',
+  verifyCsrfToken,
+  updateInventoryValidationRules,
+  validate,
+  updateInventory
+);
 
 module.exports = router;

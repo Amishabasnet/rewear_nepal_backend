@@ -21,7 +21,9 @@ const registerValidationRules = [
     .notEmpty()
     .withMessage('Name is required')
     .isLength({ min: 2, max: 50 })
-    .withMessage('Name must be between 2 and 50 characters'),
+    .withMessage('Name must be between 2 and 50 characters')
+    .matches(/^[A-Za-z\s]+$/)
+    .withMessage('Name can only contain letters and spaces'),
 
   body('email')
     .trim()
@@ -38,10 +40,11 @@ const registerValidationRules = [
     .withMessage(STRONG_PASSWORD_MESSAGE),
 
   body('phone')
-    .optional({ checkFalsy: true })
     .trim()
-    .matches(/^[0-9+\-\s()]{7,20}$/)
-    .withMessage('Please provide a valid phone number'),
+    .notEmpty()
+    .withMessage('Phone number is required')
+    .matches(/^[0-9]{10}$/)
+    .withMessage('Phone number must be exactly 10 digits'),
 
   body('role')
     .optional()
