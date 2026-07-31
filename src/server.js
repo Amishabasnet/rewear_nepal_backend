@@ -40,6 +40,22 @@ if (process.env.TRUST_PROXY === 'true') {
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    // Covers HTML/JSON this Express app serves directly (e.g. /uploads
+    // static files, any error pages). The SPA's own document is served by
+    // Vite/your static host, not this server — its CSP lives in
+    // frontend/index.html instead.
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https://res.cloudinary.com'],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    },
   })
 );
 app.use(

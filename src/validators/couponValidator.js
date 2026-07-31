@@ -1,4 +1,5 @@
 const { body, param } = require('express-validator');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const createCouponValidationRules = [
   body('code')
     .trim()
@@ -9,7 +10,7 @@ const createCouponValidationRules = [
     .matches(/^[A-Za-z0-9_-]+$/)
     .withMessage('Coupon code can only contain letters, numbers, hyphens, and underscores'),
 
-  body('description').optional({ checkFalsy: true }).trim().isLength({ max: 300 }),
+  body('description').optional({ checkFalsy: true }).trim().isLength({ max: 300 }).customSanitizer(sanitizePlainText),
 
   body('discountType')
     .notEmpty()
@@ -63,7 +64,7 @@ const updateCouponValidationRules = [
     .exists()
     .withMessage('Coupon code cannot be changed after creation — deactivate and create a new one instead'),
 
-  body('description').optional({ checkFalsy: true }).trim().isLength({ max: 300 }),
+  body('description').optional({ checkFalsy: true }).trim().isLength({ max: 300 }).customSanitizer(sanitizePlainText),
 
   body('discountType')
     .optional()

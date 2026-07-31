@@ -1,18 +1,21 @@
 const { body, query } = require('express-validator');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const createProductValidationRules = [
   body('name')
     .trim()
     .notEmpty()
     .withMessage('Product name is required')
     .isLength({ max: 120 })
-    .withMessage('Product name cannot exceed 120 characters'),
+    .withMessage('Product name cannot exceed 120 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('description')
     .trim()
     .notEmpty()
     .withMessage('Product description is required')
     .isLength({ max: 2000 })
-    .withMessage('Description cannot exceed 2000 characters'),
+    .withMessage('Description cannot exceed 2000 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('price')
     .notEmpty()
@@ -27,9 +30,9 @@ const createProductValidationRules = [
     .custom((value, { req }) => Number(value) < Number(req.body.price))
     .withMessage('Discount price must be lower than the regular price'),
 
-  body('category').trim().notEmpty().withMessage('Product category is required'),
+  body('category').trim().notEmpty().withMessage('Product category is required').customSanitizer(sanitizePlainText),
 
-  body('brand').optional().trim(),
+  body('brand').optional().trim().customSanitizer(sanitizePlainText),
 
   body('stock')
     .notEmpty()
@@ -60,7 +63,8 @@ const updateProductValidationRules = [
     .notEmpty()
     .withMessage('Product name cannot be empty')
     .isLength({ max: 120 })
-    .withMessage('Product name cannot exceed 120 characters'),
+    .withMessage('Product name cannot exceed 120 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('description')
     .optional()
@@ -68,7 +72,8 @@ const updateProductValidationRules = [
     .notEmpty()
     .withMessage('Product description cannot be empty')
     .isLength({ max: 2000 })
-    .withMessage('Description cannot exceed 2000 characters'),
+    .withMessage('Description cannot exceed 2000 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('price')
     .optional()
@@ -80,9 +85,9 @@ const updateProductValidationRules = [
     .isFloat({ min: 0 })
     .withMessage('Discount price must be a non-negative number'),
 
-  body('category').optional().trim().notEmpty().withMessage('Category cannot be empty'),
+  body('category').optional().trim().notEmpty().withMessage('Category cannot be empty').customSanitizer(sanitizePlainText),
 
-  body('brand').optional().trim(),
+  body('brand').optional().trim().customSanitizer(sanitizePlainText),
 
   body('stock')
     .optional()

@@ -1,11 +1,13 @@
 const { body } = require('express-validator');
 const { isStrongPassword, STRONG_PASSWORD_MESSAGE } = require('../utils/passwordPolicy');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const updateUserProfileValidationRules = [
   body('name')
     .optional()
     .trim()
     .isLength({ min: 2, max: 50 })
-    .withMessage('Name must be between 2 and 50 characters'),
+    .withMessage('Name must be between 2 and 50 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('email')
     .optional()
@@ -30,25 +32,29 @@ const updateUserProfileValidationRules = [
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 200 })
-    .withMessage('Address cannot exceed 200 characters'),
+    .withMessage('Address cannot exceed 200 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('city')
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 100 })
-    .withMessage('City cannot exceed 100 characters'),
+    .withMessage('City cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('country')
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 100 })
-    .withMessage('Country cannot exceed 100 characters'),
+    .withMessage('Country cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('postalCode')
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 20 })
-    .withMessage('Postal code cannot exceed 20 characters'),
+    .withMessage('Postal code cannot exceed 20 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('role')
     .not()

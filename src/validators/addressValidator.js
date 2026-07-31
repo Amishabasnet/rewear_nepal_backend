@@ -1,11 +1,13 @@
 const { body, param } = require('express-validator');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const createAddressValidationRules = [
   body('fullName')
     .trim()
     .notEmpty()
     .withMessage('Full name is required')
     .isLength({ max: 100 })
-    .withMessage('Full name cannot exceed 100 characters'),
+    .withMessage('Full name cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('phone')
     .trim()
@@ -19,34 +21,39 @@ const createAddressValidationRules = [
     .notEmpty()
     .withMessage('Street address is required')
     .isLength({ max: 200 })
-    .withMessage('Street address cannot exceed 200 characters'),
+    .withMessage('Street address cannot exceed 200 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('city')
     .trim()
     .notEmpty()
     .withMessage('City is required')
     .isLength({ max: 100 })
-    .withMessage('City cannot exceed 100 characters'),
+    .withMessage('City cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('state')
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 100 })
-    .withMessage('State cannot exceed 100 characters'),
+    .withMessage('State cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('postalCode')
     .trim()
     .notEmpty()
     .withMessage('Postal code is required')
     .isLength({ max: 20 })
-    .withMessage('Postal code cannot exceed 20 characters'),
+    .withMessage('Postal code cannot exceed 20 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('country')
     .trim()
     .notEmpty()
     .withMessage('Country is required')
     .isLength({ max: 100 })
-    .withMessage('Country cannot exceed 100 characters'),
+    .withMessage('Country cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('isDefault')
     .optional()
@@ -61,7 +68,8 @@ const updateAddressValidationRules = [
     .notEmpty()
     .withMessage('Full name cannot be empty')
     .isLength({ max: 100 })
-    .withMessage('Full name cannot exceed 100 characters'),
+    .withMessage('Full name cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('phone')
     .optional()
@@ -75,7 +83,8 @@ const updateAddressValidationRules = [
     .notEmpty()
     .withMessage('Street address cannot be empty')
     .isLength({ max: 200 })
-    .withMessage('Street address cannot exceed 200 characters'),
+    .withMessage('Street address cannot exceed 200 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('city')
     .optional()
@@ -83,13 +92,15 @@ const updateAddressValidationRules = [
     .notEmpty()
     .withMessage('City cannot be empty')
     .isLength({ max: 100 })
-    .withMessage('City cannot exceed 100 characters'),
+    .withMessage('City cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('state')
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 100 })
-    .withMessage('State cannot exceed 100 characters'),
+    .withMessage('State cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('postalCode')
     .optional()
@@ -97,7 +108,8 @@ const updateAddressValidationRules = [
     .notEmpty()
     .withMessage('Postal code cannot be empty')
     .isLength({ max: 20 })
-    .withMessage('Postal code cannot exceed 20 characters'),
+    .withMessage('Postal code cannot exceed 20 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('country')
     .optional()
@@ -105,7 +117,8 @@ const updateAddressValidationRules = [
     .notEmpty()
     .withMessage('Country cannot be empty')
     .isLength({ max: 100 })
-    .withMessage('Country cannot exceed 100 characters'),
+    .withMessage('Country cannot exceed 100 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('isDefault')
     .not()
