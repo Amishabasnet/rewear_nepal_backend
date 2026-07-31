@@ -1,4 +1,5 @@
 const { query, param, body } = require('express-validator');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const statsValidationRules = [
   query('days')
     .optional()
@@ -77,7 +78,12 @@ const productIdParamValidationRules = [
 ];
 const rejectProductValidationRules = [
   param('id').isMongoId().withMessage('Invalid product id'),
-  body('reason').optional().trim().isLength({ max: 500 }).withMessage('reason cannot exceed 500 characters'),
+  body('reason')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('reason cannot exceed 500 characters')
+    .customSanitizer(sanitizePlainText),
 ];
 module.exports = {
   statsValidationRules,

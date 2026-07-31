@@ -1,5 +1,6 @@
 const { body, param } = require('express-validator');
 const { REPORT_REASONS } = require('../utils/reportConstants');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 
 const createReportValidationRules = [
   param('id').isMongoId().withMessage('id must be a valid product ID'),
@@ -15,7 +16,8 @@ const createReportValidationRules = [
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 500 })
-    .withMessage('details cannot exceed 500 characters'),
+    .withMessage('details cannot exceed 500 characters')
+    .customSanitizer(sanitizePlainText),
 ];
 
 const reportIdParamValidationRules = [

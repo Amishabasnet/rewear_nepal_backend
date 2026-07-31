@@ -1,5 +1,6 @@
 const { body, param } = require('express-validator');
 const { PAYMENT_METHODS, ORDER_STATUSES } = require('../utils/orderConstants');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const placeOrderValidationRules = [
   body('paymentMethod')
     .notEmpty()
@@ -27,7 +28,8 @@ const placeOrderValidationRules = [
     .if(body('shippingAddress').exists())
     .trim()
     .notEmpty()
-    .withMessage('shippingAddress.fullName is required'),
+    .withMessage('shippingAddress.fullName is required')
+    .customSanitizer(sanitizePlainText),
 
   body('shippingAddress.phone')
     .if(body('shippingAddress').exists())
@@ -41,25 +43,29 @@ const placeOrderValidationRules = [
     .if(body('shippingAddress').exists())
     .trim()
     .notEmpty()
-    .withMessage('shippingAddress.street is required'),
+    .withMessage('shippingAddress.street is required')
+    .customSanitizer(sanitizePlainText),
 
   body('shippingAddress.city')
     .if(body('shippingAddress').exists())
     .trim()
     .notEmpty()
-    .withMessage('shippingAddress.city is required'),
+    .withMessage('shippingAddress.city is required')
+    .customSanitizer(sanitizePlainText),
 
   body('shippingAddress.postalCode')
     .if(body('shippingAddress').exists())
     .trim()
     .notEmpty()
-    .withMessage('shippingAddress.postalCode is required'),
+    .withMessage('shippingAddress.postalCode is required')
+    .customSanitizer(sanitizePlainText),
 
   body('shippingAddress.country')
     .if(body('shippingAddress').exists())
     .trim()
     .notEmpty()
-    .withMessage('shippingAddress.country is required'),
+    .withMessage('shippingAddress.country is required')
+    .customSanitizer(sanitizePlainText),
   body().custom((value, { req }) => {
     if (!req.body.addressId && !req.body.shippingAddress) {
       throw new Error('Provide either addressId or a shippingAddress object');

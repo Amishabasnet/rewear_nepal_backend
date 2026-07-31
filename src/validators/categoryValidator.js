@@ -1,17 +1,20 @@
 const { body, param, query } = require('express-validator');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const createCategoryValidationRules = [
   body('name')
     .trim()
     .notEmpty()
     .withMessage('Category name is required')
     .isLength({ max: 60 })
-    .withMessage('Category name cannot exceed 60 characters'),
+    .withMessage('Category name cannot exceed 60 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('description')
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 500 })
-    .withMessage('Description cannot exceed 500 characters'),
+    .withMessage('Description cannot exceed 500 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('image').optional({ checkFalsy: true }).isURL().withMessage('Image must be a valid URL'),
 ];
@@ -24,13 +27,15 @@ const updateCategoryValidationRules = [
     .notEmpty()
     .withMessage('Category name cannot be empty')
     .isLength({ max: 60 })
-    .withMessage('Category name cannot exceed 60 characters'),
+    .withMessage('Category name cannot exceed 60 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('description')
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 500 })
-    .withMessage('Description cannot exceed 500 characters'),
+    .withMessage('Description cannot exceed 500 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('image').optional({ checkFalsy: true }).isURL().withMessage('Image must be a valid URL'),
 

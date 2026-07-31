@@ -41,9 +41,9 @@ const sendTokenResponse = (user, statusCode, res, req) => {
     sameSite: process.env.COOKIE_SAME_SITE || 'lax',
     path: '/',
   };
+ 
   res.status(statusCode).cookie('token', token, cookieOptions).json({
     success: true,
-    token,
     data: {
       _id: user._id,
       name: user.name,

@@ -2,6 +2,7 @@ const { body, validationResult } = require('express-validator');
 const ApiError = require('../utils/ApiError');
 const { isStrongPassword, STRONG_PASSWORD_MESSAGE } = require('../utils/passwordPolicy.js');
 const { isAdminEmail, ADMIN_EMAIL_DOMAIN } = require('../utils/adminPolicy');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -71,7 +72,8 @@ const updateProfileValidationRules = [
     .optional()
     .trim()
     .isLength({ min: 2, max: 50 })
-    .withMessage('Name must be between 2 and 50 characters'),
+    .withMessage('Name must be between 2 and 50 characters')
+    .customSanitizer(sanitizePlainText),
 
   body('email')
     .optional()

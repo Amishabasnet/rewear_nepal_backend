@@ -1,4 +1,5 @@
 const { body, param } = require('express-validator');
+const { sanitizePlainText } = require('../utils/sanitizeInput');
 const createReviewValidationRules = [
   param('id').isMongoId().withMessage('id must be a valid product ID'),
 
@@ -13,7 +14,8 @@ const createReviewValidationRules = [
     .optional({ checkFalsy: true })
     .trim()
     .isLength({ max: 1000 })
-    .withMessage('comment cannot exceed 1000 characters'),
+    .withMessage('comment cannot exceed 1000 characters')
+    .customSanitizer(sanitizePlainText),
 ];
 const productIdParamValidationRules = [
   param('id').isMongoId().withMessage('id must be a valid product ID'),
